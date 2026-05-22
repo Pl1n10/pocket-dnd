@@ -24,3 +24,6 @@ dist/
 # Minion (keep config + MINION.md + teacher-plan.md tracked)
 .minion/state/
 .minion/briefs/
+
+# Local archives (seed tarballs, throwaway dumps)
+.archive/

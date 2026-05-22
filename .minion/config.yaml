@@ -1,0 +1,27 @@
+version: 1
+backend:
+  preferred: auto
+  repowise_binary: repowise
+teacher:
+  provider: noop
+  model: null
+reviewer:
+  provider: noop
+  model: null
+brief:
+  max_files: 25
+  max_file_bytes: 200000
+  max_snippet_files: 5
+  max_snippet_lines: 40
+  ignore_globs:
+  - .git/**
+  - .venv/**
+  - venv/**
+  - node_modules/**
+  - dist/**
+  - build/**
+  - __pycache__/**
+  - .minion/**
+  - '*.lock'
+  - '*.min.js'
+  - '*.map'

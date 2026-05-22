@@ -20,3 +20,7 @@ dist/
 
 # OS
 .DS_Store
+
+# Minion (keep config + MINION.md + teacher-plan.md tracked)
+.minion/state/
+.minion/briefs/

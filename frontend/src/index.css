@@ -1,0 +1,106 @@
+/* pocket-dnd — stile globale.
+   Direzione estetica: "tavern-dark". Fondo scurissimo per giocare al buio di
+   un pub; accenti caldi da luce di candela; tap target generosi; tipografia
+   leggibile a colpo d'occhio. Niente estetica dashboard. */
+
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap');
+
+:root {
+  --bg:        #16130f;   /* legno bruciato, quasi nero */
+  --bg-card:   #211c16;   /* superficie sollevata */
+  --bg-card-2: #2b2419;   /* superficie piu' chiara */
+  --ink:       #ede4d3;   /* testo primario, pergamena */
+  --ink-dim:   #a99c84;   /* testo secondario */
+  --ink-faint: #6f6552;   /* hint */
+  --candle:    #e0a23a;   /* accento caldo, oro candela */
+  --candle-dim:#8a6526;
+  --blood:     #a3372e;   /* danno, pericolo */
+  --moss:      #5f7d4a;   /* positivo, guarigione */
+  --line:      #3a3225;   /* bordi */
+  --radius:    10px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Spectral', Georgia, serif;
+  font-size: 17px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* niente selezione accidentale durante i tap rapidi al tavolo */
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, h3 {
+  font-family: 'Cinzel', serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Layout base mobile-first: una colonna stretta, mai piu' larga del telefono */
+.screen {
+  max-width: 440px;
+  margin: 0 auto;
+  min-height: 100%;
+  padding: 18px 16px 40px;
+}
+
+/* Barra di stato connessione, sempre visibile in alto */
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 14px;
+}
+.conn .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ink-faint);
+}
+.conn.open    .dot { background: var(--moss); }
+.conn.reconnecting .dot { background: var(--candle); animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+/* Card generica */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+/* Pulsante azione: tap target grosso, stile inciso */
+.btn {
+  display: block;
+  width: 100%;
+  background: var(--bg-card-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-family: 'Cinzel', serif;
+  font-size: 15px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  min-height: 52px;          /* tap target comodo al buio */
+  transition: background 0.12s, border-color 0.12s;
+}
+.btn:active {
+  background: var(--candle-dim);
+  border-color: var(--candle);
+}
+
+/* Loader / stati vuoti */
+.muted { color: var(--ink-dim); }
+.center { text-align: center; padding: 40px 0; }

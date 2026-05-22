@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Database (runtime — il seed lo rigenera)
+*.db
+*.db-journal
+*.db-wal
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Ambiente
+.env
+.direnv/
+
+# OS
+.DS_Store

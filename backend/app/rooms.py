@@ -108,6 +108,17 @@ class Room:
             "active_token_id": self._active_token_id,
         }
 
+    def _first_free_cell(self) -> tuple[int, int] | None:
+        """Prima cella libera della griglia (scan riga per riga). None se
+        tutte e 64 sono occupate (improbabile, ma gestito)."""
+        occupied = {(t.x, t.y) for t in self._tokens.values()
+                    if t.x is not None and t.y is not None}
+        for y in range(_GRID_SIZE):
+            for x in range(_GRID_SIZE):
+                if (x, y) not in occupied:
+                    return (x, y)
+        return None
+
     def _initiative_order(self) -> list[str]:
         """Ordine d'iniziativa corrente: PG + nemici, initiative desc.
         Token senza iniziativa vanno in fondo. Stesso criterio dello snapshot."""
@@ -124,12 +135,16 @@ class Room:
 
     def add_participant(self, character_id: int, name: str,
                          current_hp: int, max_hp: int) -> None:
-        """Aggiunge un personaggio alla sessione. Conta come mutazione."""
+        """Aggiunge un personaggio alla sessione. Auto-posiziona la pedina
+        nella prima cella libera (vedi `_first_free_cell`)."""
         token_id = f"pc:{character_id}"
+        cell = self._first_free_cell()
         self._tokens[token_id] = _Token(
             token_id=token_id, name=name,
             current_hp=current_hp, max_hp=max_hp,
             is_enemy=False, character_id=character_id,
+            x=cell[0] if cell else None,
+            y=cell[1] if cell else None,
         )
         self._version += 1
 
@@ -187,10 +202,13 @@ class Room:
     def _on_enemy_add(self, payload: dict) -> None:
         tid = payload["token_id"]
         max_hp = payload.get("max_hp", 1)
+        cell = self._first_free_cell()
         self._tokens[tid] = _Token(
             token_id=tid, name=payload.get("name", "Nemico"),
             current_hp=payload.get("current_hp", max_hp), max_hp=max_hp,
             is_enemy=True,
+            x=cell[0] if cell else None,
+            y=cell[1] if cell else None,
         )
 
     def _on_enemy_remove(self, payload: dict) -> None:

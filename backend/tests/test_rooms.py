@@ -192,13 +192,45 @@ class TestGridTokens:
     """La griglia e' una superficie muta (DECISIONS.md D14): conserva la
     posizione di ogni pedina, niente altro. Niente distanze, niente regole."""
 
-    def test_participant_starts_with_no_position(self):
-        # un PG appena aggiunto non e' ancora sulla griglia
+    def test_participant_autoplaced_on_first_free_cell(self):
+        # un PG appena aggiunto viene messo automaticamente sulla griglia,
+        # nella prima cella libera (altrimenti sarebbe in limbo: non
+        # selezionabile dalla griglia perche' non c'e', quindi inamovibile)
         room = Room(session_id=1)
         room.add_participant(character_id=1, name="Brannor",
                              current_hp=28, max_hp=28)
         p = room.snapshot()["participants"][0]
-        assert p["position"] is None
+        assert p["position"] == {"x": 0, "y": 0}
+
+    def test_multiple_adds_get_different_cells(self):
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.add_participant(character_id=2, name="B", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("enemy_add", {"token_id": "enemy:1",
+                                           "name": "G", "max_hp": 7}))
+        positions = [t["position"] for t in
+                     room.snapshot()["participants"] + room.snapshot()["enemies"]]
+        # tre pedine, tre posizioni distinte (e non None)
+        assert all(p is not None for p in positions)
+        assert len({(p["x"], p["y"]) for p in positions}) == 3
+
+    def test_enemy_autoplaced_on_first_free_cell(self):
+        room = Room(session_id=1)
+        room.apply(RoomEvent("enemy_add", {"token_id": "enemy:1",
+                                           "name": "G", "max_hp": 7}))
+        e = room.snapshot()["enemies"][0]
+        assert e["position"] == {"x": 0, "y": 0}
+
+    def test_autoplace_respects_already_occupied_cells(self):
+        # se la prima cella e' gia' occupata, la successiva si sposta
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        # ora (0,0) e' occupata; il prossimo va in (1,0)
+        room.add_participant(character_id=2, name="B", current_hp=10, max_hp=10)
+        positions = {(t["position"]["x"], t["position"]["y"])
+                     for t in room.snapshot()["participants"]}
+        assert (0, 0) in positions
+        assert (1, 0) in positions
 
     def test_move_token_sets_position(self):
         room = Room(session_id=1)

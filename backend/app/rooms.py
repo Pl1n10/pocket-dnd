@@ -214,6 +214,16 @@ class Room:
     def _on_enemy_remove(self, payload: dict) -> None:
         self._tokens.pop(payload["token_id"], None)
 
+    def _on_remove_participant(self, payload: dict) -> None:
+        """Toglie un PG dalla sessione (simmetrico di add_participant).
+        Accetta sia token_id sia character_id. NON tocca il DB: il PG resta
+        nel roster e puo' essere ri-aggiunto."""
+        tid = payload.get("token_id")
+        if tid is None and "character_id" in payload:
+            tid = f"pc:{payload['character_id']}"
+        if tid is not None:
+            self._tokens.pop(tid, None)
+
     def _on_next_turn(self, payload: dict) -> None:
         """Avanza la pedina di turno (D15): ricalcola sempre l'ordine dallo
         stato corrente. Se la pedina attiva non c'e' piu' (rimossa, oppure
@@ -248,6 +258,7 @@ class Room:
         "move_token": _on_move_token,
         "enemy_add": _on_enemy_add,
         "enemy_remove": _on_enemy_remove,
+        "remove_participant": _on_remove_participant,
         "next_turn": _on_next_turn,
         "roll": _on_roll,
     }

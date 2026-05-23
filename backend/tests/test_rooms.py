@@ -302,6 +302,44 @@ class TestEnemyTokens:
         assert room.snapshot()["enemies"] == []
 
 
+class TestRemoveParticipant:
+    """Simmetrico a enemy_remove ma per i PG: toglie il PG dalla sessione.
+    Non tocca il DB (il PG resta nel roster, e' solo fuori dalla room)."""
+
+    def test_remove_participant_drops_from_snapshot(self):
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.add_participant(character_id=2, name="B", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("remove_participant", {"character_id": 1}))
+        pcs = room.snapshot()["participants"]
+        assert [p["name"] for p in pcs] == ["B"]
+
+    def test_remove_participant_by_token_id(self):
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("remove_participant", {"token_id": "pc:1"}))
+        assert room.snapshot()["participants"] == []
+
+    def test_remove_unknown_participant_is_silent_noop(self):
+        room = Room(session_id=1)
+        # nessuno in sessione: rimuovere uno inesistente non deve far crashare
+        room.apply(RoomEvent("remove_participant", {"character_id": 999}))
+        assert room.snapshot()["participants"] == []
+
+    def test_remove_active_participant_clears_active_token(self):
+        # se il PG di turno viene rimosso, active_token_id non lo punta piu'
+        # (auto-sanazione coerente con D15: next_turn ricalcola)
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] == "pc:1"
+        room.apply(RoomEvent("remove_participant", {"character_id": 1}))
+        # active rimane formalmente "pc:1" finche' non si chiama next_turn,
+        # ma il prossimo next_turn deve gestirlo (gia' coperto da TestTurnOrder)
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] is None
+
+
 class TestTurnOrder:
     """Il turno corrente vive nella Room. `next_turn` ricalcola sempre l'ordine
     dallo snapshot attuale (DECISIONS.md D15): se la pedina di turno e' stata

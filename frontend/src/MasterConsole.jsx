@@ -224,7 +224,9 @@ export default function MasterConsole() {
                   linkUrl={playerUrl(p.character_id)}
                   onShowLink={() => setQrUrl(playerUrl(p.character_id))}
                   onLevelUp={() => levelUpPc(p)}
-                  onLoot={() => giveLoot(p)} />
+                  onLoot={() => giveLoot(p)}
+                  onRemove={() => sendEvent('remove_participant',
+                                             { token_id: p.token_id })} />
       ))}
       {availableToAdd.length > 0 && (
         <div style={{ marginTop: 10 }}>

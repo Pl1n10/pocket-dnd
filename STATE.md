@@ -4,7 +4,7 @@
 > Per le decisioni stabili vedi `DECISIONS.md`; questo file e' volatile.
 
 ## Ultimo aggiornamento
-2026-05-22 — fine Step 6.
+2026-05-23 — fine Step 7. **v0 giocabile end-to-end.**
 
 ## Dove siamo
 
@@ -76,23 +76,30 @@
   enemy_add -> move_token -> hp_change -> rimozione, broadcast master/giocatore.
 - **Suite backend: 154 test verdi.**
 
-## DEBITO TECNICO aperto
+**Step 7 — Iniziativa & turni: COMPLETATO.**
+- Debito saldato: nuovo evento WS `add_participant` (handler nel server, non
+  in `rooms.py` perche' legge dal `CharacterRepo`). Errore al mittente se PG
+  inesistente, socket viva. 4 test verdi.
+- Tiro d'iniziativa lato server (D13): eventi `roll_initiative` (singolo) e
+  `roll_all_initiative` (tutti i token). 1d20 + mod_DEX per i PG (letto dal
+  repo), 1d20 per i nemici. Il tiro appare anche nel feed. 6 test verdi.
+- `rooms.py` espone `active_token_id` nello snapshot ed evento `next_turn`:
+  ricalcola sempre l'ordine dallo stato corrente (D15), wrap-around, gestisce
+  pedina attiva rimossa. 8 test verdi.
+- `frontend/src/Grid.jsx` — nuova prop `activeId`, alone giallo distinto dal
+  bordo oro della selezione.
+- `frontend/src/MasterConsole.jsx` — sezione "Combattimento" con pulsanti
+  "Tira iniziativa" e "Turno successivo →", evidenziazione pedina di turno,
+  sezione "Aggiungi alla sessione" con i PG persistenti disponibili
+  (consuma il nuovo `add_participant`).
+- `frontend/src/PlayerSheet.jsx` — banner "Tocca a te" giallo, `activeId`
+  passato alla griglia.
+- Nuova decisione: `DECISIONS.md` D15 (next_turn auto-rebalancing).
+- Build di produzione verificata. Flusso end-to-end verificato dal vivo:
+  add_participant -> roll_all_initiative -> next_turn (giro completo con wrap).
+- **Suite backend: 172 test verdi.**
 
-**Manca l'evento `add_participant` sul WebSocket.** La `Room` ha il metodo
-Python ma non è esposto come evento, quindi una room nasce senza PG e dal
-frontend non c'è modo di aggiungerli. Va saldato all'inizio dello Step 7
-(l'iniziativa non ha senso senza PG in sessione). Dettagli completi nel
-`HANDOFF.md`, sezione "DEBITO TECNICO".
-
-## NOTA DI CHIUSURA SESSIONE (2026-05-22)
-
-Sessione conclusa per esaurimento contesto a fine Step 6. Tutto il lavoro è
-documentato. Per riprendere: leggere `HANDOFF.md` — contiene la mini-spec
-completa dello Step 7 (iniziativa & turni) e il debito da saldare.
-Nessun codice lasciato a metà; la suite è verde, il frontend builda.
-
-
-## Prossimo: Step 7 — Iniziativa & turni
+## Prossimo: Step 8 — Level-up assistito
 
 ## Piano completo (riferimento)
 
@@ -102,11 +109,12 @@ Nessun codice lasciato a metà; la suite è verde, il frontend builda.
 4. ✅ WebSocket + room (reconnect, stato autoritativo)
 5. ✅ Frontend scheda giocatore (mobile, tap-to-roll)
 6. ✅ Frontend consolle master (PG, HP, griglia, feed live)
-7. ⬜ Iniziativa & turni
+7. ✅ Iniziativa & turni
 8. ⬜ Level-up assistito
 9. ⬜ PWA + deploy duale
 
-v0 giocabile davvero = fine Step 7.
+v0 giocabile davvero = ✅ raggiunto a fine Step 7. Step 8-9 sono rifinitura
+e packaging.
 
 ## Note aperte / da decidere più avanti
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSession } from './useSession.js'
 import Grid from './Grid.jsx'
 
@@ -14,6 +14,15 @@ const SESSION_ID = 1
 export default function MasterConsole() {
   const { state, status, sendEvent, lastError } = useSession(SESSION_ID)
   const [selectedToken, setSelectedToken] = useState(null)
+  const [roster, setRoster] = useState([])
+
+  // catalogo dei PG persistenti, per la sezione "Aggiungi alla sessione"
+  useEffect(() => {
+    fetch('/api/characters')
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setRoster)
+      .catch(() => setRoster([]))
+  }, [])
 
   if (!state) {
     return (
@@ -27,6 +36,10 @@ export default function MasterConsole() {
   const participants = state.participants || []
   const enemies = state.enemies || []
   const allTokens = [...participants, ...enemies]
+  const activeId = state.active_token_id
+  // PG persistenti che NON sono ancora stati portati in sessione
+  const inSessionIds = new Set(participants.map((p) => p.character_id))
+  const availableToAdd = roster.filter((c) => !inSessionIds.has(c.id))
 
   function moveSelectedTo(x, y) {
     if (!selectedToken) return
@@ -58,6 +71,26 @@ export default function MasterConsole() {
         {participants.length} eroi · {enemies.length} nemici
       </div>
 
+      <h3 style={sectionTitle}>Combattimento</h3>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <button onClick={() => sendEvent('roll_all_initiative', {})}
+                style={actionBtn}>
+          Tira iniziativa
+        </button>
+        <button onClick={() => sendEvent('next_turn', {})}
+                style={{ ...actionBtn, background: 'var(--candle-dim)',
+                          color: 'var(--bg)' }}>
+          Turno successivo →
+        </button>
+      </div>
+      {activeId && (
+        <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+          Tocca a: <strong style={{ color: 'var(--candle)' }}>
+            {tokenLabel(allTokens, activeId)}
+          </strong>
+        </div>
+      )}
+
       <h3 style={sectionTitle}>Griglia</h3>
       {selectedToken && (
         <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
@@ -69,15 +102,39 @@ export default function MasterConsole() {
           tokens={allTokens}
           gridSize={state.grid_size || 8}
           selectedId={selectedToken}
+          activeId={activeId}
           onTokenTap={(id) => setSelectedToken(id === selectedToken ? null : id)}
           onCellTap={moveSelectedTo}
         />
       </div>
 
       <h3 style={sectionTitle}>Eroi</h3>
+      {participants.length === 0 && (
+        <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+          Nessun eroe in sessione. Aggiungine uno qui sotto.
+        </div>
+      )}
       {participants.map((p) => (
-        <TokenRow key={p.token_id} token={p} onHp={changeHp} />
+        <TokenRow key={p.token_id} token={p} onHp={changeHp}
+                  isActive={p.token_id === activeId} />
       ))}
+      {availableToAdd.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+            Aggiungi alla sessione:
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {availableToAdd.map((c) => (
+              <button key={c.id}
+                      onClick={() => sendEvent('add_participant',
+                                                { character_id: c.id })}
+                      style={pillBtn}>
+                + {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between',
                     alignItems: 'center', margin: '18px 0 10px' }}>
@@ -97,6 +154,7 @@ export default function MasterConsole() {
       {enemies.map((e) => (
         <TokenRow key={e.token_id} token={e}
                   onHp={changeHp}
+                  isActive={e.token_id === activeId}
                   onRemove={() => sendEvent('enemy_remove', { token_id: e.token_id })} />
       ))}
 
@@ -117,6 +175,25 @@ const sectionTitle = {
   fontSize: 15, margin: '18px 0 10px', color: 'var(--ink-dim)',
 }
 
+const actionBtn = {
+  flex: 1,
+  background: 'var(--bg-card-2)', color: 'var(--candle)',
+  border: '1px solid var(--candle-dim)', borderRadius: 8,
+  padding: '10px 12px', fontFamily: 'Cinzel, serif', fontSize: 14,
+  cursor: 'pointer',
+}
+
+const pillBtn = {
+  background: 'var(--bg-card-2)', color: 'var(--ink)',
+  border: '1px solid var(--line)', borderRadius: 16,
+  padding: '4px 12px', fontSize: 12, cursor: 'pointer',
+}
+
+function tokenLabel(tokens, id) {
+  const t = tokens.find((x) => x.token_id === id)
+  return t ? t.name : id
+}
+
 function ConnBar({ status }) {
   const label = { open: 'connesso', connecting: 'connessione…',
                    reconnecting: 'riconnessione…' }[status] || status
@@ -129,16 +206,27 @@ function ConnBar({ status }) {
 }
 
 // Riga di una pedina nella lista: nome, HP con +/-, eventuale rimozione.
-function TokenRow({ token, onHp, onRemove }) {
+// isActive evidenzia chi sta giocando il proprio turno.
+function TokenRow({ token, onHp, onRemove, isActive = false }) {
   const pct = token.max_hp > 0
     ? Math.max(0, Math.min(100, (token.current_hp / token.max_hp) * 100))
     : 0
   return (
-    <div className="card" style={{ padding: '10px 12px' }}>
+    <div className="card" style={{
+      padding: '10px 12px',
+      border: isActive ? '1px solid #f4c95d' : undefined,
+      boxShadow: isActive ? '0 0 8px #f4c95d55' : undefined,
+    }}>
       <div style={{ display: 'flex', justifyContent: 'space-between',
                     alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontFamily: 'Cinzel, serif', fontSize: 15 }}>
+          {isActive && <span style={{ marginRight: 6 }}>▶</span>}
           {token.name}
+          {token.initiative != null && (
+            <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+              ini {token.initiative}
+            </span>
+          )}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <HpStepBtn label="−" onClick={() => onHp(token, -1)} />

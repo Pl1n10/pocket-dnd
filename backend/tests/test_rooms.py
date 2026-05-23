@@ -268,3 +268,89 @@ class TestEnemyTokens:
                                            "name": "Goblin", "max_hp": 7}))
         room.apply(RoomEvent("enemy_remove", {"token_id": "enemy:1"}))
         assert room.snapshot()["enemies"] == []
+
+
+class TestTurnOrder:
+    """Il turno corrente vive nella Room. `next_turn` ricalcola sempre l'ordine
+    dallo snapshot attuale (DECISIONS.md D15): se la pedina di turno e' stata
+    rimossa o l'iniziativa e' cambiata, il giro si auto-aggiusta."""
+
+    def test_fresh_room_has_no_active_token(self):
+        assert Room(session_id=1).snapshot()["active_token_id"] is None
+
+    def test_next_turn_on_empty_room_is_noop(self):
+        # nessuna pedina: nessun turno da attivare, ma l'evento e' valido
+        room = Room(session_id=1)
+        room.apply(RoomEvent("next_turn", {}))
+        snap = room.snapshot()
+        assert snap["active_token_id"] is None
+        assert snap["version"] == 1
+
+    def test_next_turn_activates_first_token(self):
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] == "pc:1"
+
+    def test_next_turn_follows_initiative_order(self):
+        # ordine: chi ha iniziativa piu' alta gioca prima
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="Lento", current_hp=10, max_hp=10)
+        room.add_participant(character_id=2, name="Svelto", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("initiative_set", {"character_id": 1, "initiative": 5}))
+        room.apply(RoomEvent("initiative_set", {"character_id": 2, "initiative": 20}))
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] == "pc:2"
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] == "pc:1"
+
+    def test_next_turn_wraps_around(self):
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.add_participant(character_id=2, name="B", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("next_turn", {}))   # primo turno (qualcuno)
+        room.apply(RoomEvent("next_turn", {}))   # secondo turno (l'altro)
+        first = room.snapshot()["active_token_id"]
+        room.apply(RoomEvent("next_turn", {}))   # giro nuovo: torna al primo
+        last = room.snapshot()["active_token_id"]
+        # dopo il wrap il turno e' tornato a chi era primo nell'ordine
+        # (non sappiamo chi e' il primo ma sappiamo che e' il "two ago")
+        # equivalentemente: 3 next_turn su 2 pedine = stesso turno del primo
+        assert last != first
+
+    def test_next_turn_includes_enemies(self):
+        # il giro gira sulle pedine, PG E nemici insieme
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="PG", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("enemy_add", {"token_id": "enemy:1",
+                                           "name": "Goblin", "max_hp": 7}))
+        room.apply(RoomEvent("initiative_set", {"character_id": 1, "initiative": 10}))
+        room.apply(RoomEvent("initiative_set", {"token_id": "enemy:1", "initiative": 18}))
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] == "enemy:1"
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] == "pc:1"
+
+    def test_next_turn_restarts_if_active_token_was_removed(self):
+        # se la pedina attiva viene rimossa, il prossimo next_turn riparte
+        # dal primo nell'ordine corrente (D15)
+        room = Room(session_id=1)
+        room.apply(RoomEvent("enemy_add", {"token_id": "enemy:1",
+                                           "name": "G1", "max_hp": 7}))
+        room.apply(RoomEvent("enemy_add", {"token_id": "enemy:2",
+                                           "name": "G2", "max_hp": 7}))
+        room.apply(RoomEvent("initiative_set", {"token_id": "enemy:1", "initiative": 15}))
+        room.apply(RoomEvent("initiative_set", {"token_id": "enemy:2", "initiative": 10}))
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] == "enemy:1"
+        # tolgo la pedina attiva: l'active_token_id non e' piu' valido
+        room.apply(RoomEvent("enemy_remove", {"token_id": "enemy:1"}))
+        # prossimo turno: riparte dal primo dell'ordine corrente
+        room.apply(RoomEvent("next_turn", {}))
+        assert room.snapshot()["active_token_id"] == "enemy:2"
+
+    def test_active_token_id_in_snapshot(self):
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("next_turn", {}))
+        assert "active_token_id" in room.snapshot()

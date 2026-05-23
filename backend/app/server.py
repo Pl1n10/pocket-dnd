@@ -25,6 +25,48 @@ from app.characters import (
 )
 from app.dice import roll, Advantage, DiceError
 from app.rooms import RoomManager, RoomEvent, UnknownEvent
+from app.rules import ability_modifier
+
+
+def _find_token(snapshot: dict, token_id: str | None) -> dict | None:
+    """Cerca un token (PG o nemico) nello snapshot per token_id."""
+    if token_id is None:
+        return None
+    for t in (*snapshot["participants"], *snapshot["enemies"]):
+        if t["token_id"] == token_id:
+            return t
+    return None
+
+
+def _apply_initiative_roll(room, repo: CharacterRepo, token: dict) -> None:
+    """Tira l'iniziativa per UNA pedina e applica gli effetti sulla room.
+
+    Per i PG il modificatore e' mod_DEX (letto dal repo); per i nemici e' 0
+    (non hanno scheda). Il tiro va anche nel feed: il master vede chi ha
+    tirato cosa, come per ogni altro tiro fatto dal server (D13).
+    """
+    cid = token.get("character_id")
+    if cid is not None:
+        try:
+            character = repo.get(cid)
+            mod = ability_modifier(character["dex"])
+        except (CharacterNotFound, ValueError):
+            mod = 0
+    else:
+        mod = 0
+
+    sign = "+" if mod >= 0 else "-"
+    formula = f"1d20{sign}{abs(mod)}" if mod else "1d20"
+    result = roll(formula)
+    room.apply(RoomEvent("initiative_set", {
+        "token_id": token["token_id"], "initiative": result.total}))
+    room.apply(RoomEvent("roll", {
+        "character_id": cid,
+        "label": f"Iniziativa ({token['name']})",
+        "formula": formula,
+        "result": result.total,
+        "breakdown": result.breakdown,
+    }))
 
 
 def _resolve_roll(payload: dict) -> "RoomEvent":
@@ -161,6 +203,45 @@ def create_app(db_path: str, schema_sql: str) -> FastAPI:
                     except DiceError as e:
                         await websocket.send_json({"type": "error", "detail": str(e)})
                         continue
+                # add_participant: bisogna leggere dal CharacterRepo,
+                # cosa che la Room pura non puo' fare. Si applica qui,
+                # non passando da room.apply().
+                elif msg_type == "add_participant":
+                    cid = payload.get("character_id")
+                    try:
+                        character = repo.get(cid)
+                    except CharacterNotFound as e:
+                        await websocket.send_json({"type": "error", "detail": str(e)})
+                        continue
+                    room.add_participant(
+                        character_id=character["id"],
+                        name=character["name"],
+                        current_hp=character["current_hp"],
+                        max_hp=character["max_hp"],
+                    )
+                    await _broadcast(session_id, room)
+                    continue
+                # roll_initiative: il server tira 1d20 + mod_DEX (PG) o 1d20
+                # (nemici). Applica initiative_set + log nel feed.
+                elif msg_type == "roll_initiative":
+                    tid = payload.get("token_id")
+                    snap = room.snapshot()
+                    tok = _find_token(snap, tid)
+                    if tok is None:
+                        await websocket.send_json({"type": "error",
+                            "detail": f"pedina inesistente: {tid!r}"})
+                        continue
+                    _apply_initiative_roll(room, repo, tok)
+                    await _broadcast(session_id, room)
+                    continue
+                # roll_all_initiative: comodita' per il master, tira per ogni
+                # pedina (PG e nemici) e fa un solo broadcast finale.
+                elif msg_type == "roll_all_initiative":
+                    snap = room.snapshot()
+                    for tok in (*snap["participants"], *snap["enemies"]):
+                        _apply_initiative_roll(room, repo, tok)
+                    await _broadcast(session_id, room)
+                    continue
                 else:
                     event = RoomEvent(type=msg_type, payload=payload)
 

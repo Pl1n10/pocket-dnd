@@ -11,7 +11,9 @@
 //   gridSize -> intero (8 in v0)
 //   onCellTap(x, y) -> chiamato al tap su una cella; usato per spostare
 //                      la pedina selezionata. Se assente, griglia in sola lettura.
-//   selectedId -> token_id della pedina selezionata (evidenziata)
+//   selectedId -> token_id della pedina selezionata (bordo oro)
+//   activeId   -> token_id della pedina di TURNO (alone giallo lampeggiante);
+//                 distinto dalla selezione per non confondere i due stati.
 //   onTokenTap(token_id) -> chiamato al tap su una pedina (per selezionarla)
 //   canMove(token_id) -> ritorna true se quella pedina e' spostabile
 //                        (il master puo' tutte, il giocatore solo la propria)
@@ -25,6 +27,7 @@ export default function Grid({
   gridSize = 8,
   onCellTap,
   selectedId = null,
+  activeId = null,
   onTokenTap,
   canMove = () => true,
 }) {
@@ -55,6 +58,7 @@ export default function Grid({
             <TokenChip
               token={token}
               selected={token.token_id === selectedId}
+              active={token.token_id === activeId}
               movable={canMove(token.token_id)}
               onTap={() => onTokenTap && onTokenTap(token.token_id)}
             />
@@ -76,7 +80,7 @@ export default function Grid({
   )
 }
 
-function TokenChip({ token, selected, movable, onTap }) {
+function TokenChip({ token, selected, active, movable, onTap }) {
   const enemy = token.is_enemy
   return (
     <div
@@ -87,6 +91,9 @@ function TokenChip({ token, selected, movable, onTap }) {
         background: enemy ? '#4a2e26' : '#3a4a2e',
         border: `${selected ? 2.5 : 1.5}px solid ${
           selected ? '#e0a23a' : enemy ? '#a3372e' : '#5f7d4a'}`,
+        // alone giallo per la pedina di turno (distinto dal bordo oro
+        // pieno della selezione: l'alone "respira" attorno alla pedina)
+        boxShadow: active ? '0 0 0 3px #f4c95d, 0 0 8px 2px #f4c95daa' : 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 12, fontWeight: 700,
         color: enemy ? '#e8b5ad' : '#cfe0bb',

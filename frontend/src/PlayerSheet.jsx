@@ -72,6 +72,8 @@ export default function PlayerSheet() {
   const hp = liveSelf ? liveSelf.current_hp : char.current_hp
   const maxHp = liveSelf ? liveSelf.max_hp : char.max_hp
   const conditions = liveSelf?.conditions ?? []
+  const myTokenId = `pc:${characterId}`
+  const isMyTurn = state?.active_token_id === myTokenId
 
   // le azioni "tirabili": gli attacchi della scheda + i tiri base
   const actions = buildActions(char)
@@ -86,6 +88,16 @@ export default function PlayerSheet() {
           {capitalize(char.race)} {capitalize(char.class)} · livello {char.level}
         </div>
       </header>
+
+      {isMyTurn && (
+        <div className="card" style={{
+          background: '#f4c95d22', border: '1px solid #f4c95d',
+          color: '#f4c95d', fontFamily: 'Cinzel, serif',
+          textAlign: 'center', padding: '8px 12px', fontSize: 15,
+        }}>
+          ▶ Tocca a te
+        </div>
+      )}
 
       <HpBar hp={hp} maxHp={maxHp} />
 
@@ -190,6 +202,7 @@ function BattleGrid({ state, characterId, sendEvent }) {
         tokens={allTokens}
         gridSize={state.grid_size || 8}
         selectedId={selected}
+        activeId={state.active_token_id}
         canMove={(id) => id === myTokenId}
         onTokenTap={(id) => {
           // selezionabile solo la propria pedina

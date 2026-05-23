@@ -80,6 +80,8 @@ class Room:
         # tutte le pedine, PG e nemici, indicizzate per token_id
         self._tokens: dict[str, _Token] = {}
         self._roll_feed: list[dict] = []
+        # pedina di turno (None = combattimento non iniziato)
+        self._active_token_id: str | None = None
 
     # ─────────────────────────── snapshot ───────────────────────────
 
@@ -103,7 +105,20 @@ class Room:
             "participants": by_initiative(pcs),
             "enemies": by_initiative(enemies),
             "roll_feed": list(self._roll_feed),
+            "active_token_id": self._active_token_id,
         }
+
+    def _initiative_order(self) -> list[str]:
+        """Ordine d'iniziativa corrente: PG + nemici, initiative desc.
+        Token senza iniziativa vanno in fondo. Stesso criterio dello snapshot."""
+        return sorted(
+            self._tokens.keys(),
+            key=lambda tid: (
+                self._tokens[tid].initiative is not None,
+                self._tokens[tid].initiative or 0,
+            ),
+            reverse=True,
+        )
 
     # ─────────────────────── mutazioni dirette ───────────────────────
 
@@ -181,6 +196,20 @@ class Room:
     def _on_enemy_remove(self, payload: dict) -> None:
         self._tokens.pop(payload["token_id"], None)
 
+    def _on_next_turn(self, payload: dict) -> None:
+        """Avanza la pedina di turno (D15): ricalcola sempre l'ordine dallo
+        stato corrente. Se la pedina attiva non c'e' piu' (rimossa, oppure
+        prima chiamata in assoluto), il turno parte dal primo nell'ordine."""
+        order = self._initiative_order()
+        if not order:
+            self._active_token_id = None
+            return
+        if self._active_token_id not in order:
+            self._active_token_id = order[0]
+            return
+        idx = order.index(self._active_token_id)
+        self._active_token_id = order[(idx + 1) % len(order)]
+
     def _on_roll(self, payload: dict) -> None:
         self._roll_feed.append({
             "character_id": payload.get("character_id"),
@@ -201,6 +230,7 @@ class Room:
         "move_token": _on_move_token,
         "enemy_add": _on_enemy_add,
         "enemy_remove": _on_enemy_remove,
+        "next_turn": _on_next_turn,
         "roll": _on_roll,
     }
 

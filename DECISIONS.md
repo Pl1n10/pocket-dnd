@@ -267,3 +267,28 @@ partecipanti della room (identità e HP già lì); i nemici sono pedine generich
 che il master aggiunge al volo (nome + HP, nessuno statblock). Eventi nuovi:
 `move_token`, `enemy_add`, `enemy_remove`. Il master muove tutte le pedine,
 ogni giocatore solo la propria.
+
+---
+
+## D15 — `next_turn` ricalcola sempre l'ordine, non lo congela
+
+**Decisione.** La `Room` espone un `active_token_id` (la pedina di turno) e un
+evento `next_turn`. L'handler NON tiene una lista d'iniziativa congelata a
+inizio combattimento: ad ogni chiamata ricalcola l'ordine dallo stato corrente
+(`_initiative_order()`), trova la pedina attiva e passa alla successiva.
+
+Se l'`active_token_id` non è più nell'ordine (pedina rimossa) o non era mai
+stato impostato, il turno parte dal primo. Wrap-around dall'ultimo al primo.
+
+**Perché.** Al pub succede di tutto: un nemico muore, un nuovo arriva, un
+giocatore tira tardi l'iniziativa. Una lista congelata richiederebbe codice di
+rebalance ad ogni mutazione (aggiunta, rimozione, cambio iniziativa) e
+introdurrebbe stati incoerenti tra la lista e la realtà. Ricalcolare ogni volta
+dallo snapshot è O(n) su n=10-15 pedine — costo trascurabile — ed elimina
+intere classi di bug.
+
+**Conseguenza.** Cambiare l'iniziativa di una pedina a metà combattimento è
+sicuro: la posizione nel giro si sistema da sé al prossimo `next_turn`. Stessa
+cosa per `enemy_add`/`enemy_remove`. La pedina attiva resta "logicamente" tale
+finché non si chiama `next_turn`, anche se nel frattempo è stata rimossa —
+l'inconsistenza si auto-sana al passaggio di turno.

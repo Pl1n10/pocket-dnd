@@ -247,3 +247,154 @@ class TestRollRequest:
             roll = ws.receive_json()["state"]["roll_feed"][0]
             # con vantaggio il breakdown menziona entrambi i d20
             assert "vantaggio" in roll["breakdown"]
+
+
+class TestAddParticipant:
+    """Saldo del debito: il client puo' mettere PG in sessione via WS.
+
+    L'evento `add_participant` ha bisogno del CharacterRepo per leggere il
+    personaggio (nome, HP), quindi va intercettato nel server come
+    `roll_request` — la `Room` pura non ha accesso al repo.
+    """
+
+    def test_add_participant_puts_character_in_room(self, client):
+        cid = _make_character(client, name="Brannor")
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "add_participant",
+                          "payload": {"character_id": cid}})
+            snap = ws.receive_json()
+            assert snap["type"] == "snapshot"
+            pcs = snap["state"]["participants"]
+            assert len(pcs) == 1
+            assert pcs[0]["name"] == "Brannor"
+            assert pcs[0]["character_id"] == cid
+
+    def test_add_participant_uses_repo_hp_values(self, client):
+        # il server legge HP correnti e massimi DAL repo, non dal payload
+        cid = _make_character(client, name="Brannor")
+        client.patch(f"/api/characters/{cid}", json={"current_hp": 7})
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "add_participant",
+                          "payload": {"character_id": cid}})
+            pc = ws.receive_json()["state"]["participants"][0]
+            assert pc["current_hp"] == 7
+            assert pc["max_hp"] == 28
+
+    def test_add_unknown_character_returns_error(self, client):
+        # PG inesistente: errore al mittente, socket viva, stato invariato
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "add_participant",
+                          "payload": {"character_id": 9999}})
+            err = ws.receive_json()
+            assert err["type"] == "error"
+            # la socket regge: un evento valido continua a funzionare
+            cid = _make_character(client, name="Altro")
+            ws.send_json({"type": "add_participant",
+                          "payload": {"character_id": cid}})
+            ok = ws.receive_json()
+            assert ok["type"] == "snapshot"
+            assert len(ok["state"]["participants"]) == 1
+
+    def test_add_participant_is_broadcast(self, client):
+        # come gli altri eventi, raggiunge tutti i device in sessione
+        cid = _make_character(client, name="Brannor")
+        with client.websocket_connect("/ws/session/1") as ws_a, \
+             client.websocket_connect("/ws/session/1") as ws_b:
+            ws_a.receive_json()
+            ws_b.receive_json()
+            ws_a.send_json({"type": "add_participant",
+                            "payload": {"character_id": cid}})
+            ws_a.receive_json()
+            update_b = ws_b.receive_json()
+            assert update_b["state"]["participants"][0]["name"] == "Brannor"
+
+
+class TestInitiative:
+    """Tiro d'iniziativa: lo fa il SERVER (D13). 1d20 + mod_DEX per i PG,
+    1d20 per i nemici (non hanno scheda). Il tiro appare anche nel feed."""
+
+    def test_roll_initiative_sets_participant_initiative(self, client):
+        cid = _make_character(client, name="Brannor")   # dex=13 -> mod +1
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "add_participant",
+                          "payload": {"character_id": cid}})
+            ws.receive_json()
+            ws.send_json({"type": "roll_initiative",
+                          "payload": {"token_id": f"pc:{cid}"}})
+            snap = ws.receive_json()
+            init = snap["state"]["participants"][0]["initiative"]
+            # 1d20 + mod_dex(+1): range [2, 21]
+            assert init is not None
+            assert 2 <= init <= 21
+
+    def test_roll_initiative_appears_in_feed(self, client):
+        cid = _make_character(client, name="Brannor")
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "add_participant",
+                          "payload": {"character_id": cid}})
+            ws.receive_json()
+            ws.send_json({"type": "roll_initiative",
+                          "payload": {"token_id": f"pc:{cid}"}})
+            feed = ws.receive_json()["state"]["roll_feed"]
+            assert len(feed) == 1
+            assert "niziativa" in feed[0]["label"]
+
+    def test_roll_initiative_for_enemy_uses_zero_modifier(self, client):
+        # un nemico non ha scheda: mod = 0, range [1, 20]
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "enemy_add", "payload": {
+                "token_id": "enemy:1", "name": "Goblin", "max_hp": 7}})
+            ws.receive_json()
+            ws.send_json({"type": "roll_initiative",
+                          "payload": {"token_id": "enemy:1"}})
+            snap = ws.receive_json()
+            init = snap["state"]["enemies"][0]["initiative"]
+            assert init is not None
+            assert 1 <= init <= 20
+
+    def test_roll_initiative_unknown_token_returns_error(self, client):
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "roll_initiative",
+                          "payload": {"token_id": "pc:9999"}})
+            err = ws.receive_json()
+            assert err["type"] == "error"
+
+    def test_roll_all_initiative_rolls_for_everyone(self, client):
+        # tira per ogni token in sessione: PG e nemici
+        a = _make_character(client, name="A")
+        b = _make_character(client, name="B")
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            for cid in (a, b):
+                ws.send_json({"type": "add_participant",
+                              "payload": {"character_id": cid}})
+                ws.receive_json()
+            ws.send_json({"type": "enemy_add", "payload": {
+                "token_id": "enemy:1", "name": "Goblin", "max_hp": 7}})
+            ws.receive_json()
+
+            ws.send_json({"type": "roll_all_initiative", "payload": {}})
+            snap = ws.receive_json()
+            pcs = snap["state"]["participants"]
+            enemies = snap["state"]["enemies"]
+            assert all(p["initiative"] is not None for p in pcs)
+            assert all(e["initiative"] is not None for e in enemies)
+            # feed contiene un tiro per ciascuno (2 PG + 1 nemico)
+            assert len(snap["state"]["roll_feed"]) == 3
+
+    def test_roll_all_initiative_on_empty_room_is_noop(self, client):
+        # nessun token: il broadcast deve comunque arrivare, niente errori
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "roll_all_initiative", "payload": {}})
+            snap = ws.receive_json()
+            assert snap["type"] == "snapshot"
+            assert snap["state"]["participants"] == []
+            assert snap["state"]["enemies"] == []

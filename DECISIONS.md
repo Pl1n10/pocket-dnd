@@ -292,3 +292,41 @@ sicuro: la posizione nel giro si sistema da sé al prossimo `next_turn`. Stessa
 cosa per `enemy_add`/`enemy_remove`. La pedina attiva resta "logicamente" tale
 finché non si chiama `next_turn`, anche se nel frattempo è stata rimossa —
 l'inconsistenza si auto-sana al passaggio di turno.
+
+---
+
+## D16 — Il level-up cura completamente
+
+**Decisione.** Quando un PG sale di livello, `current_hp` viene riportato a
+`max_hp` (dopo che `max_hp` ha già incluso il gain del nuovo livello).
+
+**Perché.** Il caso d'uso del level-up è "fine sessione al pub": il gruppo
+chiude l'avventura, decide chi è salito di livello, e si saluta. In fiction
+questo è anche il momento del riposo lungo narrativo — non avrebbe senso
+ripartire la sessione successiva mezzi feriti perché l'app ha contabilizzato
+solo il gain del dado vita. Tenere separati "level-up" e "cura completa"
+costringerebbe il giocatore a un secondo tap su "ripara HP" che farebbe sempre,
+ogni volta — l'esempio canonico di feature che non aggiunge informazione.
+
+**Scartato.** "Solo +gain HP, niente cura" — più aderente a una lettura
+stretta di 5e, ma scollegata dal nostro caso d'uso (D1 — companion per il pub,
+non simulatore).
+
+---
+
+## D17 — Il dado vita si guarda nella SRD, non si replica sul PG
+
+**Decisione.** Il level-up non duplica il `hit_die` sul personaggio: lo legge
+al volo dalla tabella `srd_classes` via lookup sullo slug `class` del PG. Se
+la classe non è in SRD, il level-up fallisce con un errore esplicito.
+
+**Perché.** Il dado vita è una proprietà *della classe*, non del personaggio.
+Duplicarlo su `characters` introdurrebbe un secondo posto in cui può andare
+fuori sincronia col seed SRD. La nostra "regola d'oro" è "l'app conserva ed
+esporta tutto, ma garantisce la correttezza solo del nucleo": la SRD è la
+fonte autoritativa di ciò che è SRD, e il level-up — che usa una regola SRD —
+deve attingere lì.
+
+**Conseguenza.** PG homebrew (classe inventata, non nella SRD) non possono
+fare level-up assistito. Coerente con D2: l'app non inventa, il DM fa a mano
+e aggiorna i campi nel guscio `extended`.

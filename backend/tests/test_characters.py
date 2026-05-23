@@ -242,3 +242,107 @@ class TestImport:
                 "declared": {"custom_lore": "tiene un segreto"}}
         cid = repo.import_character(data)
         assert repo.get(cid)["extended"]["custom_lore"] == "tiene un segreto"
+
+
+# ───────────────────────────── level up ─────────────────────────────
+
+def _seed_classes(repo):
+    """Popola srd_classes con i dadi vita standard. Senza questa tabella il
+    level-up non puo' conoscere il dado vita del PG (D2 — l'app non inventa)."""
+    with repo._lock:
+        repo._conn.executemany(
+            "INSERT INTO srd_classes (slug, name, hit_die) VALUES (?, ?, ?)",
+            [("fighter", "Fighter", 10), ("wizard", "Wizard", 6),
+             ("rogue", "Rogue", 8), ("barbarian", "Barbarian", 12)],
+        )
+        repo._conn.commit()
+
+
+class TestLevelUp:
+    """Level-up assistito (D3): livello +1, proficiency ricalcolata, HP a
+    valore medio del dado vita + mod_COS, cura completa (D16). Le scelte di
+    build (sottoclasse, feat, nuovo incantesimo) restano del giocatore e
+    arrivano via un patch testuale che viene mergiato nel guscio `extended`."""
+
+    def test_level_up_increments_level(self, repo):
+        _seed_classes(repo)
+        cid = repo.create(_sample_character())   # liv 3
+        repo.level_up(cid)
+        assert repo.get(cid)["level"] == 4
+
+    def test_level_up_recomputes_proficiency_at_milestone(self, repo):
+        _seed_classes(repo)
+        char = _sample_character()
+        char["level"] = 4    # liv 4 -> +2, prossimo (5) -> +3
+        cid = repo.create(char)
+        repo.level_up(cid)
+        assert repo.get(cid)["proficiency_bonus"] == 3
+
+    def test_level_up_adds_hp_average_plus_con_mod(self, repo):
+        # fighter -> d10 (media 6); con 14 -> mod +2; gain = 8
+        _seed_classes(repo)
+        cid = repo.create(_sample_character())   # max_hp=28
+        repo.level_up(cid)
+        c = repo.get(cid)
+        assert c["max_hp"] == 28 + 8
+
+    def test_level_up_full_heals(self, repo):
+        # D16: il level-up cura completamente (fine sessione = respiro lungo)
+        _seed_classes(repo)
+        char = _sample_character()
+        char["current_hp"] = 5
+        cid = repo.create(char)
+        repo.level_up(cid)
+        c = repo.get(cid)
+        assert c["current_hp"] == c["max_hp"]
+
+    def test_level_up_minimum_gain_is_one(self, repo):
+        # con CON molto basso (mod -5), gain = max(1, 5 + (-5)) = 1
+        _seed_classes(repo)
+        char = _sample_character()
+        char["con"] = 1   # mod -5
+        cid = repo.create(char)
+        repo.level_up(cid)
+        c = repo.get(cid)
+        assert c["max_hp"] == 28 + 1
+
+    def test_level_up_at_max_raises(self, repo):
+        _seed_classes(repo)
+        char = _sample_character()
+        char["level"] = 20
+        cid = repo.create(char)
+        with pytest.raises(ValueError):
+            repo.level_up(cid)
+
+    def test_level_up_unknown_class_raises(self, repo):
+        # nessuna srd_classes seedata: la classe del PG non e' conosciuta
+        char = _sample_character()
+        cid = repo.create(char)
+        with pytest.raises(ValueError):
+            repo.level_up(cid)
+
+    def test_level_up_unknown_character_raises(self, repo):
+        _seed_classes(repo)
+        with pytest.raises(CharacterNotFound):
+            repo.level_up(9999)
+
+    def test_level_up_merges_extended_patch(self, repo):
+        _seed_classes(repo)
+        char = _sample_character()
+        char["extended"] = {"background": "Soldier", "notes": "Vecchio"}
+        cid = repo.create(char)
+        repo.level_up(cid, extended_patch={"notes": "Nuovo", "feat": "Lucky"})
+        ext = repo.get(cid)["extended"]
+        # campo preesistente non toccato resta, patch sovrascrive solo le sue chiavi
+        assert ext["background"] == "Soldier"
+        assert ext["notes"] == "Nuovo"
+        assert ext["feat"] == "Lucky"
+
+    def test_level_up_returns_summary(self, repo):
+        _seed_classes(repo)
+        cid = repo.create(_sample_character())
+        summary = repo.level_up(cid)
+        assert summary["old_level"] == 3
+        assert summary["new_level"] == 4
+        assert summary["hp_gained"] == 8
+        assert summary["hit_die"] == 10

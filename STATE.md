@@ -4,7 +4,7 @@
 > Per le decisioni stabili vedi `DECISIONS.md`; questo file e' volatile.
 
 ## Ultimo aggiornamento
-2026-05-23 — fine Step 7. **v0 giocabile end-to-end.**
+2026-05-23 — fine Step 9. **Pronto al deploy.**
 
 ## Dove siamo
 
@@ -99,7 +99,47 @@
   add_participant -> roll_all_initiative -> next_turn (giro completo con wrap).
 - **Suite backend: 172 test verdi.**
 
-## Prossimo: Step 8 — Level-up assistito
+**Step 8 — Level-up assistito: COMPLETATO.**
+- `CharacterRepo.level_up()`: lookup classe -> dado vita da `srd_classes`
+  (D17), gain HP via `level_up_hp_gain()`, cura completa (D16), merge
+  superficiale di `extended_patch`, validazione (max 20, classe nota,
+  PG esistente). Restituisce un `summary` (old/new level, hp_gained, hit_die).
+- Endpoint `POST /api/characters/{id}/level-up` con payload opzionale
+  `{extended: {...}}`. Mappa errori: 404 (PG inesistente), 422 (classe
+  sconosciuta, livello max).
+- Frontend: sezione "Fine sessione" su `PlayerSheet` (a bassa priorita'
+  visiva), pulsante con prompt testuale per le scelte di build manuali
+  (vanno in `extended` come testo opaco — D8). Messaggio di esito inline.
+- Nuove decisioni: D16 (cura completa), D17 (hit_die dalla SRD, non dal PG).
+- E2E verificato dal vivo: Brannor liv 3 con 15/28 HP -> liv 4, 36/36 HP,
+  feat "Lucky" mergiata nel guscio.
+- **Suite backend: 187 test verdi.**
+
+**Step 9 — PWA + deploy duale: COMPLETATO.**
+- `create_app(static_dir=...)` opzionale: monta `/assets` come StaticFiles
+  e installa un catch-all SPA che serve `index.html` per le route
+  client-side (es. `/master`, `/player/:id`). API e WS hanno priorita'.
+- `main.py --static` o env `POCKETDND_STATIC` per attivare il modo
+  binario-unico (un processo, una porta). Dev resta col proxy Vite.
+- PWA: `frontend/public/manifest.webmanifest`, `icon.svg` (d20 stilizzato
+  tavern-dark), `sw.js` cache-first per `/assets/*` (immutabili per via
+  degli hash nel nome) e network-first con fallback per la SPA. Mai cache
+  di API/WS (D5). Registrato in `main.jsx`.
+- `Dockerfile` multi-stage (node 24-alpine -> python 3.12-slim), volume
+  `/data` per il file SQLite, healthcheck via urllib su `/health`.
+- `docker-compose.yml` per gira-su-tutto: laptop, devbox, urano/gaia.
+- `docs/DEPLOY.md` — guida deploy: quick start, modalita' pub (LAN +
+  hotspot), tre modi di collegare Cloudflare Tunnel (cloudflared di
+  sistema / accanto via compose / esistente), backup SQLite.
+- Container buildato e fumato dal vivo: `/`, `/master`,
+  `/manifest.webmanifest`, `/sw.js`, `/health`, `/api/characters` tutti
+  rispondono OK su :8000 in container.
+- **Suite backend: 192 test verdi.**
+
+## Prossimo
+
+V0 packaged: il prodotto e' giocabile e deployabile. Stato successivo
+dipende dall'uso al tavolo — vedi `HANDOFF.md` per le idee del v1.
 
 ## Piano completo (riferimento)
 
@@ -110,8 +150,10 @@
 5. ✅ Frontend scheda giocatore (mobile, tap-to-roll)
 6. ✅ Frontend consolle master (PG, HP, griglia, feed live)
 7. ✅ Iniziativa & turni
-8. ⬜ Level-up assistito
-9. ⬜ PWA + deploy duale
+8. ✅ Level-up assistito
+9. ✅ PWA + deploy duale
+
+**Tutti gli step v0 completati.**
 
 v0 giocabile davvero = ✅ raggiunto a fine Step 7. Step 8-9 sono rifinitura
 e packaging.

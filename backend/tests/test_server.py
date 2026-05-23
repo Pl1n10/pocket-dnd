@@ -100,6 +100,103 @@ class TestCharacterApi:
         assert resp.status_code == 422
 
 
+class TestLevelUpEndpoint:
+    """POST /api/characters/{id}/level-up — endpoint del level-up assistito."""
+
+    def _seed_classes(self, client):
+        # popola srd_classes via la stessa connessione del repo dell'app
+        repo = client.app.state.repo
+        with repo._lock:
+            repo._conn.execute(
+                "INSERT INTO srd_classes (slug, name, hit_die) "
+                "VALUES ('fighter', 'Fighter', 10)"
+            )
+            repo._conn.commit()
+
+    def test_level_up_returns_summary_and_updated_character(self, client):
+        self._seed_classes(client)
+        cid = _make_character(client)   # liv 3, con 14
+        resp = client.post(f"/api/characters/{cid}/level-up", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["old_level"] == 3
+        assert data["summary"]["new_level"] == 4
+        assert data["character"]["level"] == 4
+
+    def test_level_up_unknown_character_returns_404(self, client):
+        resp = client.post("/api/characters/9999/level-up", json={})
+        assert resp.status_code == 404
+
+    def test_level_up_at_max_returns_422(self, client):
+        self._seed_classes(client)
+        cid = _make_character(client)
+        client.patch(f"/api/characters/{cid}", json={"level": 20})
+        resp = client.post(f"/api/characters/{cid}/level-up", json={})
+        assert resp.status_code == 422
+
+    def test_level_up_unknown_class_returns_422(self, client):
+        # niente seed di srd_classes: la classe del PG non e' nota
+        cid = _make_character(client)
+        resp = client.post(f"/api/characters/{cid}/level-up", json={})
+        assert resp.status_code == 422
+
+    def test_level_up_merges_extended_patch_from_body(self, client):
+        self._seed_classes(client)
+        cid = _make_character(client)
+        resp = client.post(f"/api/characters/{cid}/level-up",
+                            json={"extended": {"feat": "Lucky"}})
+        assert resp.status_code == 200
+        assert resp.json()["character"]["extended"]["feat"] == "Lucky"
+
+
+class TestStaticSpa:
+    """Modalita' container: il backend serve anche la SPA buildata. Le route
+    API/WS hanno priorita'; le altre cadono sull'index della SPA."""
+
+    @pytest.fixture
+    def static_client(self, tmp_path):
+        # fake dist: index.html + assets/app.js
+        (tmp_path / "assets").mkdir()
+        (tmp_path / "assets" / "app.js").write_text("console.log('app')")
+        (tmp_path / "index.html").write_text("<!doctype html><h1>Pocket D&amp;D</h1>")
+        app = create_app(
+            db_path=":memory:",
+            schema_sql=SCHEMA.read_text(encoding="utf-8"),
+            static_dir=str(tmp_path),
+        )
+        return TestClient(app)
+
+    def test_root_serves_index_html(self, static_client):
+        resp = static_client.get("/")
+        assert resp.status_code == 200
+        assert "Pocket D" in resp.text
+
+    def test_assets_are_served(self, static_client):
+        resp = static_client.get("/assets/app.js")
+        assert resp.status_code == 200
+        assert "console.log" in resp.text
+
+    def test_spa_route_falls_back_to_index(self, static_client):
+        # /master e /player/123 sono route del client router: il server
+        # rimanda l'index e React decide cosa mostrare.
+        for path in ("/master", "/player/42"):
+            resp = static_client.get(path)
+            assert resp.status_code == 200, path
+            assert "Pocket D" in resp.text
+
+    def test_api_routes_still_work_with_static_mounted(self, static_client):
+        # le rotte API non devono essere intercettate dal fallback SPA
+        resp = static_client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        resp2 = static_client.get("/api/characters")
+        assert resp2.status_code == 200
+
+    def test_static_dir_optional_falls_back_to_no_spa(self, client):
+        # senza static_dir: GET /random_path -> 404 (nessun fallback)
+        assert client.get("/unmapped").status_code == 404
+
+
 # ───────────────────────────── WebSocket ─────────────────────────────
 
 class TestWebSocket:

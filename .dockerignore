@@ -1,0 +1,29 @@
+# Roba che non deve mai finire nel context Docker
+.git
+.gitignore
+
+# Frontend
+frontend/node_modules
+frontend/dist
+
+# Backend
+backend/__pycache__
+backend/**/__pycache__
+backend/*.db
+backend/*.db-journal
+backend/*.db-wal
+backend/.pytest_cache
+backend/.venv
+
+# Sviluppo
+.archive
+.idea
+.vscode
+*.swp
+*.swo
+
+# Documenti (non servono al runtime, ma stanno in repo)
+HANDOFF.md
+STATE.md
+FAILURES.md
+TESTING.md

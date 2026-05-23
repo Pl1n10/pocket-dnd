@@ -1,0 +1,35 @@
+# pocket-dnd — docker-compose
+#
+# Modalita' casa: gira su urano/gaia, esposto via Cloudflare Tunnel
+# (cloudflared in container separato — vedi docs/DEPLOY.md).
+#
+# Modalita' pub: gira sul laptop sotto hotspot. I telefoni si collegano in
+# LAN locale a http://<ip-laptop>:8000. Zero dipendenza da internet.
+#
+# Avvio dopo la prima volta:
+#   docker compose up -d --build
+#   docker compose exec pocket-dnd python3 scripts/seed_srd.py /data/pocket-dnd.db
+#   # apri http://localhost:8000
+
+services:
+  pocket-dnd:
+    build: .
+    image: pocket-dnd:latest
+    container_name: pocket-dnd
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - pocket-dnd-data:/data
+    environment:
+      POCKETDND_DB: /data/pocket-dnd.db
+      POCKETDND_STATIC: /app/dist
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  pocket-dnd-data:

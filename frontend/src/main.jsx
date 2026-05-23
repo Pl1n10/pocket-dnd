@@ -17,3 +17,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <RouterProvider router={router} />
   </React.StrictMode>
 )
+
+// Registrazione del Service Worker (PWA). Silenzioso in caso di errore:
+// in dev (Vite) il /sw.js non c'e' e va bene cosi'.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}

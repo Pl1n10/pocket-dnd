@@ -16,7 +16,11 @@ processo e' vivo. SQLite serve solo alla persistenza tra sessioni.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.characters import (
     CharacterRepo,
@@ -92,9 +96,16 @@ def _resolve_roll(payload: dict) -> "RoomEvent":
     })
 
 
-def create_app(db_path: str, schema_sql: str) -> FastAPI:
+def create_app(db_path: str, schema_sql: str,
+               static_dir: str | None = None) -> FastAPI:
     """Costruisce l'app. db_path e schema sono iniettati per i test
-    (':memory:' in test, un file vero in produzione)."""
+    (':memory:' in test, un file vero in produzione).
+
+    static_dir: se valorizzato e la dir esiste, il backend serve anche la
+    SPA buildata da li' — un binario, una porta (modalita' pub e container).
+    Se None o dir inesistente, il backend e' solo REST+WS (modalita' dev
+    col Vite dev server che proxa).
+    """
     app = FastAPI(title="pocket-dnd")
 
     repo = CharacterRepo(db_path)
@@ -152,6 +163,20 @@ def create_app(db_path: str, schema_sql: str) -> FastAPI:
             return repo.export_character(character_id)
         except CharacterNotFound:
             raise HTTPException(status_code=404, detail="personaggio inesistente")
+
+    @app.post("/api/characters/{character_id}/level-up")
+    def level_up_character(character_id: int, body: dict | None = None):
+        """Level-up assistito (D3, D16). Payload opzionale:
+            { "extended": { ...campi liberi del giocatore... } }
+        I campi vengono mergiati nel guscio inerte."""
+        patch = (body or {}).get("extended")
+        try:
+            summary = repo.level_up(character_id, extended_patch=patch)
+        except CharacterNotFound:
+            raise HTTPException(status_code=404, detail="personaggio inesistente")
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {"summary": summary, "character": repo.get(character_id)}
 
     @app.post("/api/characters/import", status_code=201)
     def import_character(payload: dict):
@@ -256,6 +281,27 @@ def create_app(db_path: str, schema_sql: str) -> FastAPI:
                 await _broadcast(session_id, room)
         except WebSocketDisconnect:
             connections[session_id].discard(websocket)
+
+    # ────────────────── SPA statica (modalita' container/pub) ──────────────────
+    # Va montata DOPO le route API/WS cosi' il catch-all non le intercetta.
+    if static_dir:
+        static_path = Path(static_dir)
+        if static_path.is_dir():
+            assets_dir = static_path / "assets"
+            if assets_dir.is_dir():
+                app.mount("/assets", StaticFiles(directory=assets_dir),
+                          name="assets")
+            index_html = static_path / "index.html"
+
+            @app.get("/{full_path:path}")
+            def spa_fallback(full_path: str):
+                # rotte non-API: serviamo l'index della SPA. Il router del
+                # client (react-router) si occupa di mostrare la pagina giusta.
+                # /assets/* e' gia' montato sopra e non passa di qua.
+                candidate = static_path / full_path
+                if full_path and candidate.is_file():
+                    return FileResponse(candidate)
+                return FileResponse(index_html)
 
     # repo accessibile ai test che ne avessero bisogno
     app.state.repo = repo

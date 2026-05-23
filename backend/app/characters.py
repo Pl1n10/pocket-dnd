@@ -14,7 +14,7 @@ import json
 import sqlite3
 import threading
 
-from app.rules import proficiency_bonus
+from app.rules import ability_modifier, level_up_hp_gain, proficiency_bonus
 
 SCHEMA_VERSION = "pocket-dnd/1"
 COMPAT = "5e-srd-5.1"
@@ -137,6 +137,60 @@ class CharacterRepo:
             if cur.rowcount == 0:
                 raise CharacterNotFound(f"personaggio {character_id} inesistente")
             self._conn.commit()
+
+    def level_up(self, character_id: int,
+                 extended_patch: dict | None = None) -> dict:
+        """Sale di un livello in modo assistito (D3, D16).
+
+        - livello +1 (errore se gia' 20)
+        - proficiency ricalcolata da rules.proficiency_bonus
+        - HP guadagnati = valore medio del dado vita + mod_COS (min 1)
+        - cura completa: current_hp = nuovo max_hp (D16)
+        - extended_patch: merge superficiale nel guscio; le scelte di build
+          restano del giocatore, l'app le conserva e basta (D8)
+
+        Restituisce un riassunto: vecchio/nuovo livello, gain HP, dado vita.
+        """
+        char = self.get(character_id)   # solleva CharacterNotFound
+        old_level = char["level"]
+        if old_level >= 20:
+            raise ValueError(f"livello gia' al massimo (20)")
+
+        hit_die = self._hit_die_for_class(char["class"])
+        gain = level_up_hp_gain(hit_die, ability_modifier(char["con"]))
+        new_max = char["max_hp"] + gain
+        new_level = old_level + 1
+
+        merged_extended = {**(char.get("extended") or {}),
+                           **(extended_patch or {})}
+
+        self.update(character_id, {
+            "level": new_level,
+            "max_hp": new_max,
+            "current_hp": new_max,        # D16: cura completa
+            "extended": merged_extended,
+        })
+        return {
+            "old_level": old_level,
+            "new_level": new_level,
+            "hp_gained": gain,
+            "hit_die": hit_die,
+            "max_hp": new_max,
+        }
+
+    def _hit_die_for_class(self, class_slug: str) -> int:
+        """Lookup classe -> dado vita dalla SRD seedata. Solleva se la classe
+        non e' nota: l'app NON inventa (D2), il DM puo' fare a mano."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT hit_die FROM srd_classes WHERE slug = ?",
+                (class_slug or "",),
+            ).fetchone()
+        if row is None:
+            raise ValueError(
+                f"classe sconosciuta: {class_slug!r} — dado vita non determinabile"
+            )
+        return int(row["hit_die"])
 
     # ─────────────────────── serializzazione ───────────────────────
 

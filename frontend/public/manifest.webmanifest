@@ -1,0 +1,19 @@
+{
+  "name": "pocket-dnd",
+  "short_name": "pocket-dnd",
+  "description": "Companion app per D&D 5e one-shot al tavolo.",
+  "start_url": "/master",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1c1813",
+  "theme_color": "#1c1813",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

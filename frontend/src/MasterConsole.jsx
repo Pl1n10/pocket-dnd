@@ -61,6 +61,38 @@ export default function MasterConsole() {
     sendEvent('enemy_add', { token_id: tokenId, name, max_hp: hp })
   }
 
+  // Crea un PG nuovo al volo (per il giocatore che arriva al tavolo dopo)
+  // e lo aggiunge subito alla sessione. Solo i campi minimi: il resto si
+  // edita poi dalla scheda /player/:id o ricaricando lo script di seed.
+  async function newPlayer() {
+    const name = window.prompt('Nome del personaggio?', '')
+    if (!name || !name.trim()) return
+    const cls = (window.prompt(
+      'Classe SRD? (fighter, wizard, rogue, cleric, bard, ranger, ' +
+      'barbarian, sorcerer, paladin, monk, druid, warlock)',
+      'fighter') || 'fighter').toLowerCase().trim()
+    const level = Number(window.prompt('Livello?', '1')) || 1
+    const maxHp = Number(window.prompt('Punti ferita massimi?', '10')) || 10
+    const resp = await fetch('/api/characters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name.trim(), class: cls, level,
+        max_hp: maxHp, current_hp: maxHp,
+        armor_class: 12,
+      }),
+    })
+    if (!resp.ok) {
+      window.alert(`Errore creando il PG (${resp.status})`)
+      return
+    }
+    const { id } = await resp.json()
+    // ricarica la lista PG e mette subito in sessione il nuovo arrivato
+    const list = await fetch('/api/characters').then((r) => r.json())
+    setRoster(list)
+    sendEvent('add_participant', { character_id: id })
+  }
+
   return (
     <div className="screen">
       <ConnBar status={status} />
@@ -91,6 +123,9 @@ export default function MasterConsole() {
         </div>
       )}
 
+      <DmDice activeName={activeId ? tokenLabel(allTokens, activeId) : null}
+              sendEvent={sendEvent} />
+
       <h3 style={sectionTitle}>Griglia</h3>
       {selectedToken && (
         <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
@@ -108,7 +143,16 @@ export default function MasterConsole() {
         />
       </div>
 
-      <h3 style={sectionTitle}>Eroi</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'center', margin: '18px 0 10px' }}>
+        <h3 style={{ ...sectionTitle, margin: 0 }}>Eroi</h3>
+        <button onClick={newPlayer} style={{
+          background: 'var(--bg-card-2)', color: 'var(--candle)',
+          border: '1px solid var(--candle-dim)', borderRadius: 8,
+          padding: '6px 12px', fontFamily: 'Cinzel, serif', fontSize: 13,
+          cursor: 'pointer',
+        }}>+ nuovo PG</button>
+      </div>
       {participants.length === 0 && (
         <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
           Nessun eroe in sessione. Aggiungine uno qui sotto.
@@ -192,6 +236,77 @@ const pillBtn = {
 function tokenLabel(tokens, id) {
   const t = tokens.find((x) => x.token_id === id)
   return t ? t.name : id
+}
+
+// Dadi del DM: tiri rapidi (d20 con vantaggio/svantaggio, dadi base per i
+// danni dei mostri) + una formula libera. Il dado lo tira il server (D13),
+// quindi qui mandiamo solo l'intento via roll_request. Il risultato finisce
+// nel feed visibile a tutti, esattamente come i tiri dei giocatori.
+function DmDice({ activeName, sendEvent }) {
+  const [formula, setFormula] = useState('')
+  // se c'e' una pedina di turno (di solito un mostro quando tocca al DM),
+  // l'etichetta del tiro la prefissa col suo nome — cosi' il feed dice
+  // "Goblin · d20" invece di "DM · d20"
+  const who = activeName || 'DM'
+
+  function tira(f, suffix = '') {
+    sendEvent('roll_request', {
+      label: `${who} · ${suffix || f}`,
+      formula: f,
+    })
+  }
+  function tiraD20(adv) {
+    sendEvent('roll_request', {
+      label: `${who} · d20${adv === 'advantage' ? ' ↑' : adv === 'disadvantage' ? ' ↓' : ''}`,
+      formula: '1d20',
+      advantage: adv,
+    })
+  }
+  function tiraCustom() {
+    const f = formula.trim()
+    if (!f) return
+    tira(f)
+    setFormula('')
+  }
+
+  return (
+    <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+        Dadi del DM {activeName && `— per ${activeName}`}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+        <button style={dieBtn} onClick={() => tiraD20('normal')}>d20</button>
+        <button style={dieBtn} onClick={() => tiraD20('advantage')}>d20 ↑</button>
+        <button style={dieBtn} onClick={() => tiraD20('disadvantage')}>d20 ↓</button>
+        <span style={{ width: 8 }} />
+        {[4, 6, 8, 10, 12].map((n) => (
+          <button key={n} style={dieBtn} onClick={() => tira(`1d${n}`)}>d{n}</button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input value={formula}
+               onChange={(e) => setFormula(e.target.value)}
+               onKeyDown={(e) => { if (e.key === 'Enter') tiraCustom() }}
+               placeholder="es. 2d6+3"
+               style={{
+                 flex: 1,
+                 background: 'var(--bg)', color: 'var(--ink)',
+                 border: '1px solid var(--line)', borderRadius: 6,
+                 padding: '6px 10px', fontFamily: 'monospace', fontSize: 13,
+               }} />
+        <button onClick={tiraCustom} style={{ ...dieBtn, minWidth: 60 }}>
+          Tira
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const dieBtn = {
+  background: 'var(--bg-card-2)', color: 'var(--ink)',
+  border: '1px solid var(--line)', borderRadius: 6,
+  padding: '6px 12px', fontFamily: 'Cinzel, serif', fontSize: 13,
+  cursor: 'pointer',
 }
 
 function ConnBar({ status }) {

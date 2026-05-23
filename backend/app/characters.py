@@ -29,7 +29,7 @@ _UPDATABLE = {
     "max_hp", "current_hp", "armor_class", "speed",
 }
 # Colonne serializzate come JSON (liste/dict) nel DB.
-_JSON_COLUMNS = {"skill_proficiencies", "actions", "extended"}
+_JSON_COLUMNS = {"skill_proficiencies", "actions", "inventory", "extended"}
 
 
 class CharacterNotFound(LookupError):
@@ -57,9 +57,24 @@ class CharacterRepo:
     # ─────────────────────────── setup ───────────────────────────
 
     def init_schema(self, schema_sql: str) -> None:
-        """Applica lo schema (idempotente: lo schema usa IF NOT EXISTS)."""
+        """Applica lo schema (idempotente: lo schema usa IF NOT EXISTS).
+        Esegue anche migrazioni in-place per colonne aggiunte dopo: SQLite
+        ignora le colonne nuove nello schema CREATE IF NOT EXISTS, quindi
+        servono ALTER TABLE manuali per i DB pre-esistenti.
+        """
         self._conn.executescript(schema_sql)
+        self._migrate_in_place()
         self._conn.commit()
+
+    def _migrate_in_place(self) -> None:
+        """Migrazioni additive su `characters`. Idempotente: controlla
+        sempre quali colonne ci sono prima di aggiungerne."""
+        existing = {row["name"] for row in self._conn.execute(
+            "PRAGMA table_info(characters)")}
+        if "inventory" not in existing:
+            self._conn.execute(
+                "ALTER TABLE characters ADD COLUMN "
+                "inventory TEXT NOT NULL DEFAULT '[]'")
 
     def close(self) -> None:
         self._conn.close()
@@ -284,11 +299,27 @@ class CharacterRepo:
             "speed": data.get("speed", 30),
             "skill_proficiencies": data.get("skill_proficiencies", []),
             "actions": data.get("actions", []),
+            "inventory": data.get("inventory", []),
             "extended": data.get("extended", {}),
         }
         for a in _ABILITIES:
             row[a] = data.get(a, 10)
         return row
+
+    def give_item(self, character_id: int,
+                  name: str, description: str | None = None) -> list:
+        """Aggiunge un item all'inventario di un PG. Restituisce l'inventario
+        aggiornato. Il nome e' obbligatorio; la descrizione e' opzionale
+        (testo libero — l'app non interpreta gli effetti, vedi D2)."""
+        if not name or not name.strip():
+            raise ValueError("l'item deve avere un nome")
+        char = self.get(character_id)   # solleva CharacterNotFound
+        item = {"name": name.strip()}
+        if description and description.strip():
+            item["description"] = description.strip()
+        new_inv = list(char.get("inventory") or []) + [item]
+        self.update(character_id, {"inventory": new_inv})
+        return new_inv
 
     @staticmethod
     def _encode(column: str, value):

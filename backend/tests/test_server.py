@@ -149,6 +149,47 @@ class TestLevelUpEndpoint:
         assert resp.json()["character"]["extended"]["feat"] == "Lucky"
 
 
+class TestGiveItemEndpoint:
+    """POST /api/characters/{id}/inventory/give — il master da' loot a un PG."""
+
+    def test_give_item_appends_and_returns_inventory(self, client):
+        cid = _make_character(client)
+        resp = client.post(f"/api/characters/{cid}/inventory/give",
+                            json={"name": "Pozione di guarigione"})
+        assert resp.status_code == 200
+        assert resp.json()["inventory"][0]["name"] == "Pozione di guarigione"
+
+    def test_give_item_with_description(self, client):
+        cid = _make_character(client)
+        resp = client.post(f"/api/characters/{cid}/inventory/give",
+                            json={"name": "Anello", "description": "Brilla."})
+        assert resp.json()["inventory"][0]["description"] == "Brilla."
+
+    def test_give_item_to_unknown_returns_404(self, client):
+        resp = client.post("/api/characters/9999/inventory/give",
+                            json={"name": "X"})
+        assert resp.status_code == 404
+
+    def test_give_item_empty_name_returns_422(self, client):
+        cid = _make_character(client)
+        resp = client.post(f"/api/characters/{cid}/inventory/give",
+                            json={"name": ""})
+        assert resp.status_code == 422
+
+    def test_give_item_broadcasts_character_updated_to_ws(self, client):
+        # PG in sessione; un WS connesso riceve character_updated
+        cid = _make_character(client)
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()   # snapshot iniziale
+            resp = client.post(f"/api/characters/{cid}/inventory/give",
+                                json={"name": "Mappa"})
+            assert resp.status_code == 200
+            msg = ws.receive_json()
+            assert msg["type"] == "character_updated"
+            assert msg["character_id"] == cid
+            assert msg["character"]["inventory"][0]["name"] == "Mappa"
+
+
 class TestStaticSpa:
     """Modalita' container: il backend serve anche la SPA buildata. Le route
     API/WS hanno priorita'; le altre cadono sull'index della SPA."""

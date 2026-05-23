@@ -14,10 +14,15 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 //   status   -> 'connecting' | 'open' | 'reconnecting'
 //   sendEvent(type, payload) -> invia un evento; se la socket e' giu', no-op
 //   lastError-> ultimo messaggio d'errore dal server (o null)
+//
+// Opzioni:
+//   onCharacterUpdated(payload) -> chiamato quando il server emette il
+//     messaggio `character_updated` (es. dopo level-up o loot dal master).
+//     payload = { character_id, character }
 
 const MAX_BACKOFF_MS = 5000
 
-export function useSession(sessionId) {
+export function useSession(sessionId, options = {}) {
   const [state, setState] = useState(null)
   const [status, setStatus] = useState('connecting')
   const [lastError, setLastError] = useState(null)
@@ -26,6 +31,9 @@ export function useSession(sessionId) {
   const backoffRef = useRef(500)
   const closedByUs = useRef(false)
   const reconnectTimer = useRef(null)
+  // tieni in un ref la callback per evitare reconnect a ogni render
+  const onCharacterUpdatedRef = useRef(options.onCharacterUpdated)
+  onCharacterUpdatedRef.current = options.onCharacterUpdated
 
   const connect = useCallback(() => {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -51,6 +59,9 @@ export function useSession(sessionId) {
         setLastError(null)
       } else if (msg.type === 'error') {
         setLastError(msg.detail || 'errore sconosciuto')
+      } else if (msg.type === 'character_updated') {
+        const cb = onCharacterUpdatedRef.current
+        if (cb) cb({ character_id: msg.character_id, character: msg.character })
       }
     }
 

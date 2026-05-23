@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import { useSession } from './useSession.js'
 import Grid from './Grid.jsx'
 
@@ -15,6 +16,8 @@ export default function MasterConsole() {
   const { state, status, sendEvent, lastError } = useSession(SESSION_ID)
   const [selectedToken, setSelectedToken] = useState(null)
   const [roster, setRoster] = useState([])
+  // url del PG di cui stiamo mostrando il QR (null = chiuso)
+  const [qrUrl, setQrUrl] = useState(null)
 
   // catalogo dei PG persistenti, per la sezione "Aggiungi alla sessione"
   useEffect(() => {
@@ -93,6 +96,63 @@ export default function MasterConsole() {
     sendEvent('add_participant', { character_id: id })
   }
 
+  async function reloadRoster() {
+    const list = await fetch('/api/characters').then((r) => r.json())
+    setRoster(list)
+  }
+
+  async function deletePc(c) {
+    if (!window.confirm(`Eliminare ${c.name} dal database? Operazione irreversibile.`)) return
+    const resp = await fetch(`/api/characters/${c.id}`, { method: 'DELETE' })
+    if (!resp.ok && resp.status !== 204) {
+      window.alert(`Errore eliminando il PG (${resp.status})`)
+      return
+    }
+    reloadRoster()
+  }
+
+  async function levelUpPc(token) {
+    const notes = window.prompt(
+      `Scelte di build per il livello ${(rosterFind(roster, token.character_id)?.level || 0) + 1} ` +
+      `di ${token.name}: incantesimo, feat, sottoclasse… ` +
+      `(vuoto per saltare)`, '')
+    const body = notes && notes.trim()
+      ? { extended: { [`level_up_notes_${Date.now()}`]: notes.trim() } }
+      : {}
+    const resp = await fetch(`/api/characters/${token.character_id}/level-up`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      window.alert(`Errore: ${err.detail || resp.statusText}`)
+      return
+    }
+    const data = await resp.json()
+    reloadRoster()
+    window.alert(`${token.name} sale a livello ${data.summary.new_level} ` +
+                 `(+${data.summary.hp_gained} HP, cura completa).`)
+  }
+
+  async function giveLoot(token) {
+    const name = window.prompt(`Loot per ${token.name} — nome dell'oggetto?`, '')
+    if (!name || !name.trim()) return
+    const description = window.prompt(
+      `Descrizione (opzionale, testo libero):`, '') || ''
+    const resp = await fetch(
+      `/api/characters/${token.character_id}/inventory/give`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), description: description.trim() }),
+      })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      window.alert(`Errore: ${err.detail || resp.statusText}`)
+    }
+  }
+
   return (
     <div className="screen">
       <ConnBar status={status} />
@@ -160,21 +220,34 @@ export default function MasterConsole() {
       )}
       {participants.map((p) => (
         <TokenRow key={p.token_id} token={p} onHp={changeHp}
-                  isActive={p.token_id === activeId} />
+                  isActive={p.token_id === activeId}
+                  linkUrl={playerUrl(p.character_id)}
+                  onShowLink={() => setQrUrl(playerUrl(p.character_id))}
+                  onLevelUp={() => levelUpPc(p)}
+                  onLoot={() => giveLoot(p)} />
       ))}
       {availableToAdd.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
             Aggiungi alla sessione:
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {availableToAdd.map((c) => (
-              <button key={c.id}
-                      onClick={() => sendEvent('add_participant',
-                                                { character_id: c.id })}
-                      style={pillBtn}>
-                + {c.name}
-              </button>
+              <div key={c.id} style={{ display: 'flex', gap: 4 }}>
+                <button onClick={() => sendEvent('add_participant',
+                                                  { character_id: c.id })}
+                        style={{ ...pillBtn, flex: 1, textAlign: 'left' }}>
+                  + {c.name} <span className="muted" style={{ fontSize: 11 }}>
+                    ({c.race || '?'} {c.class || '?'} liv {c.level})
+                  </span>
+                </button>
+                <button onClick={() => deletePc(c)}
+                        title="Elimina dal database"
+                        style={{ ...pillBtn, color: 'var(--blood)',
+                                  borderColor: 'var(--blood)', minWidth: 32 }}>
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         </div>
@@ -209,6 +282,58 @@ export default function MasterConsole() {
       )}
 
       <RollFeed feed={state.roll_feed || []} />
+
+      {qrUrl && <QrModal url={qrUrl} onClose={() => setQrUrl(null)} />}
+    </div>
+  )
+}
+
+// URL della scheda del PG sulla stessa origin: usa il link "vero" che il
+// giocatore puo' aprire dal suo telefono nella LAN. window.location.origin
+// e' gia' "http://<ip-laptop>:8000" o il sottodominio Cloudflare, indifferente.
+function playerUrl(characterId) {
+  return `${window.location.origin}/player/${characterId}`
+}
+
+// Modal QR: il master mostra al giocatore un QR + l'URL; il giocatore
+// scansiona col telefono e l'app si apre direttamente sulla sua scheda.
+// Funziona offline (la libreria QR e' inclusa nel bundle).
+function QrModal({ url, onClose }) {
+  function copyToClipboard() {
+    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {})
+  }
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: '#000000cc',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 100, padding: 20,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} className="card" style={{
+        maxWidth: 320, textAlign: 'center', padding: 20,
+      }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+          Scansiona col telefono per aprire la scheda
+        </div>
+        <div style={{ background: '#1c1813', padding: 12, borderRadius: 8,
+                       display: 'inline-block' }}>
+          <QRCodeSVG value={url} size={220}
+                     bgColor="#1c1813" fgColor="#e0a23a"
+                     level="M" />
+        </div>
+        <div style={{ marginTop: 12, fontSize: 12,
+                       fontFamily: 'monospace', wordBreak: 'break-all',
+                       color: 'var(--ink-dim)' }}>
+          {url}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button onClick={copyToClipboard} style={{ ...pillBtn, flex: 1 }}>
+            Copia link
+          </button>
+          <button onClick={onClose} style={{ ...pillBtn, flex: 1 }}>
+            Chiudi
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -236,6 +361,10 @@ const pillBtn = {
 function tokenLabel(tokens, id) {
   const t = tokens.find((x) => x.token_id === id)
   return t ? t.name : id
+}
+
+function rosterFind(roster, characterId) {
+  return roster.find((c) => c.id === characterId)
 }
 
 // Dadi del DM: tiri rapidi (d20 con vantaggio/svantaggio, dadi base per i
@@ -322,7 +451,10 @@ function ConnBar({ status }) {
 
 // Riga di una pedina nella lista: nome, HP con +/-, eventuale rimozione.
 // isActive evidenzia chi sta giocando il proprio turno.
-function TokenRow({ token, onHp, onRemove, isActive = false }) {
+// linkUrl/onShowLink (solo per i PG): mostrano un QR per il giocatore.
+// onLevelUp / onLoot (solo per i PG): azioni che il master fa al volo.
+function TokenRow({ token, onHp, onRemove, isActive = false,
+                    linkUrl, onShowLink, onLevelUp, onLoot }) {
   const pct = token.max_hp > 0
     ? Math.max(0, Math.min(100, (token.current_hp / token.max_hp) * 100))
     : 0
@@ -341,6 +473,17 @@ function TokenRow({ token, onHp, onRemove, isActive = false }) {
             <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
               ini {token.initiative}
             </span>
+          )}
+          {linkUrl && onShowLink && (
+            <button onClick={onShowLink} title={`QR + link: ${linkUrl}`}
+                    style={{
+                      marginLeft: 8, background: 'transparent',
+                      border: '1px solid var(--line)', borderRadius: 4,
+                      color: 'var(--ink-dim)', fontSize: 11,
+                      padding: '1px 6px', cursor: 'pointer',
+                    }}>
+              🔗 link
+            </button>
           )}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -374,6 +517,16 @@ function TokenRow({ token, onHp, onRemove, isActive = false }) {
               borderRadius: 5, padding: '2px 8px', fontSize: 11,
             }}>{c}</span>
           ))}
+        </div>
+      )}
+      {(onLevelUp || onLoot) && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          {onLoot && (
+            <button onClick={onLoot} style={pillBtn}>🎁 loot</button>
+          )}
+          {onLevelUp && (
+            <button onClick={onLevelUp} style={pillBtn}>↑ liv</button>
+          )}
         </div>
       )}
     </div>

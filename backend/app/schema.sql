@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS characters (
     -- Nucleo vivo: liste serializzate (piccole, niente tabelle dedicate in v0).
     skill_proficiencies TEXT    NOT NULL DEFAULT '[]',  -- JSON: ["stealth", ...]
     actions             TEXT    NOT NULL DEFAULT '[]',  -- JSON: vedi docs/FORMAT.md
+    inventory           TEXT    NOT NULL DEFAULT '[]',  -- JSON: [{name, description?}]
 
     -- Guscio inerte: tutto ciò che l'app conserva ma NON interpreta (D8, AP7).
     extended            TEXT    NOT NULL DEFAULT '{}',  -- JSON opaco

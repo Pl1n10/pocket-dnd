@@ -165,10 +165,12 @@ def create_app(db_path: str, schema_sql: str,
             raise HTTPException(status_code=404, detail="personaggio inesistente")
 
     @app.post("/api/characters/{character_id}/level-up")
-    def level_up_character(character_id: int, body: dict | None = None):
+    async def level_up_character(character_id: int, body: dict | None = None):
         """Level-up assistito (D3, D16). Payload opzionale:
             { "extended": { ...campi liberi del giocatore... } }
-        I campi vengono mergiati nel guscio inerte."""
+        I campi vengono mergiati nel guscio inerte. Dopo la mutazione
+        broadcast WS character_updated, cosi' il PlayerSheet del PG
+        vede HP/livello aggiornati in tempo reale senza ri-fetchare."""
         patch = (body or {}).get("extended")
         try:
             summary = repo.level_up(character_id, extended_patch=patch)
@@ -176,7 +178,26 @@ def create_app(db_path: str, schema_sql: str,
             raise HTTPException(status_code=404, detail="personaggio inesistente")
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
+        await _broadcast_character_updated(character_id)
         return {"summary": summary, "character": repo.get(character_id)}
+
+    @app.post("/api/characters/{character_id}/inventory/give")
+    async def give_item_to_character(character_id: int, body: dict):
+        """Aggiunge un item all'inventario di un PG (loot del DM).
+            { "name": "Pozione di guarigione", "description": "..." }
+        Dopo la mutazione, broadcast WS character_updated."""
+        try:
+            new_inv = repo.give_item(
+                character_id,
+                name=(body or {}).get("name", ""),
+                description=(body or {}).get("description"),
+            )
+        except CharacterNotFound:
+            raise HTTPException(status_code=404, detail="personaggio inesistente")
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        await _broadcast_character_updated(character_id)
+        return {"inventory": new_inv}
 
     @app.post("/api/characters/import", status_code=201)
     def import_character(payload: dict):
@@ -203,6 +224,28 @@ def create_app(db_path: str, schema_sql: str,
                 dead.append(ws)
         for ws in dead:
             connections[session_id].discard(ws)
+
+    async def _broadcast_character_updated(character_id: int) -> None:
+        """Notifica via WS che la scheda di un PG e' cambiata (level-up,
+        loot, edit dal master). I client interessati ri-disegnano senza
+        ri-fetchare via REST. In v0 esiste una sola sessione, quindi
+        mandiamo a tutte le room aperte."""
+        try:
+            character = repo.get(character_id)
+        except CharacterNotFound:
+            return
+        message = {"type": "character_updated",
+                   "character_id": character_id, "character": character}
+        dead: list[WebSocket] = []
+        for ws_set in connections.values():
+            for ws in ws_set:
+                try:
+                    await ws.send_json(message)
+                except Exception:
+                    dead.append(ws)
+        for ws_set in connections.values():
+            for ws in dead:
+                ws_set.discard(ws)
 
     @app.websocket("/ws/session/{session_id}")
     async def session_socket(websocket: WebSocket, session_id: int):

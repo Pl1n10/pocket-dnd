@@ -346,3 +346,107 @@ class TestLevelUp:
         assert summary["new_level"] == 4
         assert summary["hp_gained"] == 8
         assert summary["hit_die"] == 10
+
+
+# ───────────────────────────── inventario ─────────────────────────────
+
+class TestInventory:
+    """Inventario: lista semplice di item dati dal master come loot.
+    Solo nome (+ descrizione opzionale): l'app non interpreta gli effetti."""
+
+    def test_new_character_has_empty_inventory(self, repo):
+        cid = repo.create(_sample_character())
+        assert repo.get(cid)["inventory"] == []
+
+    def test_give_item_appends_to_inventory(self, repo):
+        cid = repo.create(_sample_character())
+        repo.give_item(cid, "Pozione di guarigione")
+        inv = repo.get(cid)["inventory"]
+        assert len(inv) == 1
+        assert inv[0]["name"] == "Pozione di guarigione"
+
+    def test_give_item_stores_description_when_passed(self, repo):
+        cid = repo.create(_sample_character())
+        repo.give_item(cid, "Mantello sospetto", "Sembra muoversi da solo.")
+        item = repo.get(cid)["inventory"][0]
+        assert item["description"] == "Sembra muoversi da solo."
+
+    def test_give_item_omits_description_when_empty(self, repo):
+        cid = repo.create(_sample_character())
+        repo.give_item(cid, "Sasso")
+        assert "description" not in repo.get(cid)["inventory"][0]
+
+    def test_give_item_preserves_existing_items(self, repo):
+        cid = repo.create(_sample_character())
+        repo.give_item(cid, "Sacca di sale")
+        repo.give_item(cid, "Corda da 50 piedi")
+        names = [it["name"] for it in repo.get(cid)["inventory"]]
+        assert names == ["Sacca di sale", "Corda da 50 piedi"]
+
+    def test_give_item_returns_updated_inventory(self, repo):
+        cid = repo.create(_sample_character())
+        inv = repo.give_item(cid, "Daga argentata")
+        assert isinstance(inv, list) and inv[-1]["name"] == "Daga argentata"
+
+    def test_give_item_rejects_empty_name(self, repo):
+        cid = repo.create(_sample_character())
+        with pytest.raises(ValueError):
+            repo.give_item(cid, "")
+
+    def test_give_item_to_unknown_character_raises(self, repo):
+        with pytest.raises(CharacterNotFound):
+            repo.give_item(9999, "X")
+
+
+# ─────────────────────── migration in-place ───────────────────────
+
+class TestMigrationInventory:
+    """init_schema deve aggiungere la colonna `inventory` anche su DB
+    pre-esistenti creati prima che la colonna fosse introdotta."""
+
+    def test_migrates_old_db_without_inventory_column(self, tmp_path):
+        import sqlite3
+        db = tmp_path / "old.db"
+        # schema "vecchio" (senza inventory): solo i campi necessari per
+        # simulare il caso. NOT NULL minimi.
+        conn = sqlite3.connect(db)
+        conn.executescript("""
+            CREATE TABLE characters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                player_name TEXT NOT NULL DEFAULT '',
+                class TEXT NOT NULL DEFAULT '',
+                race TEXT NOT NULL DEFAULT '',
+                level INTEGER NOT NULL DEFAULT 1,
+                str INTEGER NOT NULL DEFAULT 10,
+                dex INTEGER NOT NULL DEFAULT 10,
+                con INTEGER NOT NULL DEFAULT 10,
+                int INTEGER NOT NULL DEFAULT 10,
+                wis INTEGER NOT NULL DEFAULT 10,
+                cha INTEGER NOT NULL DEFAULT 10,
+                max_hp INTEGER NOT NULL DEFAULT 1,
+                current_hp INTEGER NOT NULL DEFAULT 1,
+                armor_class INTEGER NOT NULL DEFAULT 10,
+                speed INTEGER NOT NULL DEFAULT 30,
+                proficiency_bonus INTEGER NOT NULL DEFAULT 2,
+                skill_proficiencies TEXT NOT NULL DEFAULT '[]',
+                actions TEXT NOT NULL DEFAULT '[]',
+                extended TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        """)
+        conn.execute("INSERT INTO characters (name) VALUES ('Vecchio Eroe')")
+        conn.commit()
+        conn.close()
+
+        # ora apriamo col CharacterRepo: la migration deve scattare
+        r = CharacterRepo(str(db))
+        r.init_schema(SCHEMA.read_text(encoding="utf-8"))
+        char = r.list_all()[0]
+        assert char["name"] == "Vecchio Eroe"
+        # inventory ora c'e' (vuoto, default)
+        assert char["inventory"] == []
+        # e si puo' aggiungere loot anche al PG pre-esistente
+        r.give_item(char["id"], "Pozione")
+        assert r.get(char["id"])["inventory"][0]["name"] == "Pozione"

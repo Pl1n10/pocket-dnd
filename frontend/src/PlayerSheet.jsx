@@ -23,19 +23,17 @@ export default function PlayerSheet() {
   const { characterId } = useParams()
   const [char, setChar] = useState(null)
   const [loadError, setLoadError] = useState(null)
-  const [levelUpMsg, setLevelUpMsg] = useState(null)
-  const { state, status, sendEvent, lastError } = useSession(SESSION_ID)
 
-  // carica la scheda persistente via REST. Si rifa' anche dopo un level-up.
-  function reloadChar() {
-    return fetch(`/api/characters/${characterId}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`personaggio non trovato (${r.status})`)
-        return r.json()
-      })
-      .then(setChar)
-      .catch((e) => setLoadError(e.message))
-  }
+  // Quando il master modifica la scheda (level-up, loot, ...) il server
+  // emette un messaggio WS `character_updated`: aggiorniamo char senza
+  // dover ri-fetchare via REST.
+  const { state, status, sendEvent, lastError } = useSession(SESSION_ID, {
+    onCharacterUpdated: (payload) => {
+      if (payload && String(payload.character_id) === String(characterId)) {
+        setChar(payload.character)
+      }
+    },
+  })
 
   useEffect(() => {
     let alive = true
@@ -48,30 +46,6 @@ export default function PlayerSheet() {
       .catch((e) => { if (alive) setLoadError(e.message) })
     return () => { alive = false }
   }, [characterId])
-
-  async function doLevelUp() {
-    // scelte di build manuali (D3): testo libero, finisce in extended
-    const notes = window.prompt(
-      'Scelte di build per il nuovo livello (incantesimo, feat, sottoclasse...). ' +
-      'Vuoto per saltare.', '')
-    const body = notes && notes.trim()
-      ? { extended: { [`level_${(char.level || 0) + 1}_notes`]: notes.trim() } }
-      : {}
-    const resp = await fetch(`/api/characters/${characterId}/level-up`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}))
-      setLevelUpMsg(`Errore: ${err.detail || resp.statusText}`)
-      return
-    }
-    const data = await resp.json()
-    const s = data.summary
-    setLevelUpMsg(`Salito a livello ${s.new_level}: +${s.hp_gained} HP (d${s.hit_die}). Cura completa.`)
-    await reloadChar()
-  }
 
   // lo stato di sessione del proprio personaggio (HP correnti, condizioni)
   // arriva dal WebSocket; se non c'e' ancora, si ripiega sui dati persistenti
@@ -170,44 +144,50 @@ export default function PlayerSheet() {
         </div>
       )}
 
-      <RollFeed feed={state?.roll_feed ?? []} />
+      <Inventory items={char.inventory || []} />
 
-      <EndOfSession char={char} onLevelUp={doLevelUp} message={levelUpMsg} />
+      <RollFeed feed={state?.roll_feed ?? []} />
     </div>
   )
 }
 
-// Sezione "Fine sessione" — bassa priorita' visiva, fuori dal flusso da pub.
-// Pulsante Level up: alza livello, ricalcola HP/proficiency, cura (D16) e
-// apre un campo libero per le scelte di build (D3) che vanno in extended.
-function EndOfSession({ char, onLevelUp, message }) {
-  const atMax = char.level >= 20
-  return (
-    <div style={{ marginTop: 24, paddingTop: 16,
-                   borderTop: '1px solid var(--line)' }}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-        Fine sessione
-      </div>
-      <button onClick={onLevelUp} disabled={atMax} style={{
-        width: '100%',
-        background: atMax ? 'var(--bg-card-2)' : 'var(--bg-card-2)',
-        color: atMax ? 'var(--ink-faint)' : 'var(--candle)',
-        border: `1px solid ${atMax ? 'var(--line)' : 'var(--candle-dim)'}`,
-        borderRadius: 8, padding: '10px 12px',
-        fontFamily: 'Cinzel, serif', fontSize: 14,
-        cursor: atMax ? 'not-allowed' : 'pointer',
-      }}>
-        {atMax ? 'Livello massimo raggiunto' : `↑ Sali a livello ${char.level + 1}`}
-      </button>
-      {message && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 8,
-                                         color: message.startsWith('Errore')
-                                                  ? 'var(--blood)'
-                                                  : 'var(--moss)' }}>
-          {message}
+// Inventario: lista semplice di item ricevuti dal master come loot.
+// Solo nome (+ descrizione opzionale): non e' un motore di regole (D2),
+// gli effetti meccanici li arbitra il DM.
+function Inventory({ items }) {
+  if (!items || items.length === 0) {
+    return (
+      <>
+        <h3 style={{ fontSize: 15, margin: '18px 0 10px',
+                      color: 'var(--ink-dim)' }}>
+          Inventario
+        </h3>
+        <div className="muted" style={{ fontSize: 13 }}>
+          Vuoto. Quando il DM ti darà del bottino comparirà qui.
         </div>
-      )}
-    </div>
+      </>
+    )
+  }
+  return (
+    <>
+      <h3 style={{ fontSize: 15, margin: '18px 0 10px',
+                    color: 'var(--ink-dim)' }}>
+        Inventario
+      </h3>
+      {items.map((it, i) => (
+        <div key={i} className="card" style={{ padding: '8px 12px' }}>
+          <div style={{ fontFamily: 'Cinzel, serif', fontSize: 14,
+                         color: 'var(--candle)' }}>
+            {it.name}
+          </div>
+          {it.description && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              {it.description}
+            </div>
+          )}
+        </div>
+      ))}
+    </>
   )
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useSession } from './useSession.js'
-import Grid from './Grid.jsx'
+import Grid, { tokenPalette } from './Grid.jsx'
 
 // Consolle del master: vista d'insieme di tutta la sessione.
 // Mostra tutte le pedine (PG + nemici), gli HP modificabili, la griglia di
@@ -226,6 +226,8 @@ export default function MasterConsole() {
                   onShowLink={() => setQrUrl(playerUrl(p.character_id))}
                   onLevelUp={() => levelUpPc(p)}
                   onLoot={() => giveLoot(p)}
+                  onSetColor={(c) => sendEvent('set_token_color',
+                                                { token_id: p.token_id, color: c })}
                   onRemove={() => sendEvent('remove_participant',
                                              { token_id: p.token_id })} />
       ))}
@@ -275,6 +277,8 @@ export default function MasterConsole() {
         <TokenRow key={e.token_id} token={e}
                   onHp={changeHp}
                   isActive={e.token_id === activeId}
+                  onSetColor={(c) => sendEvent('set_token_color',
+                                                { token_id: e.token_id, color: c })}
                   onRemove={() => sendEvent('enemy_remove', { token_id: e.token_id })} />
       ))}
 
@@ -456,8 +460,9 @@ function ConnBar({ status }) {
 // isActive evidenzia chi sta giocando il proprio turno.
 // linkUrl/onShowLink (solo per i PG): mostrano un QR per il giocatore.
 // onLevelUp / onLoot (solo per i PG): azioni che il master fa al volo.
+// onSetColor: cambia il colore della pedina (green/red/blue).
 function TokenRow({ token, onHp, onRemove, isActive = false,
-                    linkUrl, onShowLink, onLevelUp, onLoot }) {
+                    linkUrl, onShowLink, onLevelUp, onLoot, onSetColor }) {
   const pct = token.max_hp > 0
     ? Math.max(0, Math.min(100, (token.current_hp / token.max_hp) * 100))
     : 0
@@ -522,16 +527,44 @@ function TokenRow({ token, onHp, onRemove, isActive = false,
           ))}
         </div>
       )}
-      {(onLevelUp || onLoot) && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+      {(onLevelUp || onLoot || onSetColor) && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 8,
+                       flexWrap: 'wrap', alignItems: 'center' }}>
           {onLoot && (
             <button onClick={onLoot} style={pillBtn}>🎁 loot</button>
           )}
           {onLevelUp && (
             <button onClick={onLevelUp} style={pillBtn}>↑ liv</button>
           )}
+          {onSetColor && (
+            <ColorPicker current={token.color || (token.is_enemy ? 'red' : 'green')}
+                          onChange={onSetColor} />
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Tre pallini con i colori delle pedine; click cambia colore via WS.
+function ColorPicker({ current, onChange }) {
+  return (
+    <div style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
+      {['green', 'red', 'blue'].map((c) => {
+        const palette = tokenPalette({ color: c })
+        const selected = current === c
+        return (
+          <button key={c} onClick={() => onChange(c)}
+                  title={c}
+                  style={{
+                    width: 22, height: 22, borderRadius: '50%',
+                    background: palette.bg,
+                    border: `${selected ? 2 : 1}px solid ${
+                      selected ? '#e0a23a' : palette.border}`,
+                    cursor: 'pointer', padding: 0,
+                  }} />
+        )
+      })}
     </div>
   )
 }

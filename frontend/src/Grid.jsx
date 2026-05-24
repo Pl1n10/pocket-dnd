@@ -80,23 +80,35 @@ export default function Grid({
   )
 }
 
+// Palette delle pedine: il colore arriva dal backend (token.color).
+// Fallback su green/red in base a is_enemy per snapshot vecchi.
+const TOKEN_PALETTE = {
+  green: { bg: '#3a4a2e', border: '#5f7d4a', text: '#cfe0bb' },
+  red:   { bg: '#4a2e26', border: '#a3372e', text: '#e8b5ad' },
+  blue:  { bg: '#2e3a4a', border: '#4a6a8a', text: '#b5c8e8' },
+}
+export function tokenPalette(token) {
+  const key = token.color || (token.is_enemy ? 'red' : 'green')
+  return TOKEN_PALETTE[key] || TOKEN_PALETTE.green
+}
+
 function TokenChip({ token, selected, active, movable, onTap }) {
-  const enemy = token.is_enemy
+  const palette = tokenPalette(token)
   return (
     <div
       onClick={(e) => { e.stopPropagation(); onTap && onTap() }}
       title={token.name}
       style={{
         width: '80%', height: '80%', borderRadius: '50%',
-        background: enemy ? '#4a2e26' : '#3a4a2e',
+        background: palette.bg,
         border: `${selected ? 2.5 : 1.5}px solid ${
-          selected ? '#e0a23a' : enemy ? '#a3372e' : '#5f7d4a'}`,
+          selected ? '#e0a23a' : palette.border}`,
         // alone giallo per la pedina di turno (distinto dal bordo oro
         // pieno della selezione: l'alone "respira" attorno alla pedina)
         boxShadow: active ? '0 0 0 3px #f4c95d, 0 0 8px 2px #f4c95daa' : 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 12, fontWeight: 700,
-        color: enemy ? '#e8b5ad' : '#cfe0bb',
+        color: palette.text,
         fontFamily: 'Cinzel, serif',
         cursor: movable ? 'pointer' : 'default',
         opacity: movable ? 1 : 0.75,

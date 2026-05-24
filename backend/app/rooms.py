@@ -24,6 +24,10 @@ from dataclasses import dataclass, field
 _ROLL_FEED_CAP = 50
 # dimensione della griglia in v0 (8x8 — DECISIONS.md D14)
 _GRID_SIZE = 8
+# colori ammessi per le pedine. Verde = party, rosso = nemici, blu = PNG
+# alleati. Set chiuso: l'app non e' un design tool, e tre colori bastano
+# a distinguere le fazioni al tavolo.
+_VALID_COLORS = ("green", "red", "blue")
 
 
 class UnknownEvent(ValueError):
@@ -43,6 +47,7 @@ class _Token:
 
     token_id: identificatore stringa, "pc:<character_id>" o "enemy:<n>".
     character_id: valorizzato solo per i PG; None per i nemici.
+    color: "green" (party), "red" (nemico), "blue" (PNG alleato).
     """
     token_id: str
     name: str
@@ -54,6 +59,7 @@ class _Token:
     conditions: list[str] = field(default_factory=list)
     x: int | None = None
     y: int | None = None
+    color: str = "green"
 
     def as_dict(self) -> dict:
         position = None if self.x is None or self.y is None else {"x": self.x, "y": self.y}
@@ -65,6 +71,7 @@ class _Token:
             "initiative": self.initiative,
             "conditions": list(self.conditions),
             "position": position,
+            "color": self.color,
         }
         if not self.is_enemy:
             d["character_id"] = self.character_id
@@ -223,13 +230,26 @@ class Room:
         tid = payload["token_id"]
         max_hp = payload.get("max_hp", 1)
         cell = self._first_free_cell()
+        color = payload.get("color", "red")
+        if color not in _VALID_COLORS:
+            color = "red"
         self._tokens[tid] = _Token(
             token_id=tid, name=payload.get("name", "Nemico"),
             current_hp=payload.get("current_hp", max_hp), max_hp=max_hp,
-            is_enemy=True,
+            is_enemy=True, color=color,
             x=cell[0] if cell else None,
             y=cell[1] if cell else None,
         )
+
+    def _on_set_token_color(self, payload: dict) -> None:
+        """Cambia il colore di una pedina. Accetta solo green/red/blue;
+        valori fuori set vengono ignorati silenziosamente (no-op)."""
+        color = payload.get("color")
+        if color not in _VALID_COLORS:
+            return
+        t = self._token_from_payload(payload)
+        if t is not None:
+            t.color = color
 
     def _on_enemy_remove(self, payload: dict) -> None:
         self._tokens.pop(payload["token_id"], None)
@@ -279,6 +299,7 @@ class Room:
         "enemy_add": _on_enemy_add,
         "enemy_remove": _on_enemy_remove,
         "remove_participant": _on_remove_participant,
+        "set_token_color": _on_set_token_color,
         "next_turn": _on_next_turn,
         "roll": _on_roll,
     }

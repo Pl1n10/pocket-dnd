@@ -302,6 +302,53 @@ class TestEnemyTokens:
         assert room.snapshot()["enemies"] == []
 
 
+class TestTokenColor:
+    """Colore della pedina. Default: verde per i PG (party), rosso per le
+    pedine del DM (nemici). Il master puo' cambiarlo via set_token_color —
+    tipicamente per marcare un PNG alleato (blu) o evidenziare un boss."""
+
+    def test_participant_defaults_to_green(self):
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        assert room.snapshot()["participants"][0]["color"] == "green"
+
+    def test_enemy_defaults_to_red(self):
+        room = Room(session_id=1)
+        room.apply(RoomEvent("enemy_add", {"token_id": "enemy:1",
+                                            "name": "G", "max_hp": 7}))
+        assert room.snapshot()["enemies"][0]["color"] == "red"
+
+    def test_set_token_color_changes_color(self):
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("set_token_color",
+                              {"token_id": "pc:1", "color": "blue"}))
+        assert room.snapshot()["participants"][0]["color"] == "blue"
+
+    def test_set_token_color_ignores_unknown_color(self):
+        # solo green/red/blue sono accettati: input fuori set -> no-op
+        room = Room(session_id=1)
+        room.add_participant(character_id=1, name="A", current_hp=10, max_hp=10)
+        room.apply(RoomEvent("set_token_color",
+                              {"token_id": "pc:1", "color": "puce"}))
+        assert room.snapshot()["participants"][0]["color"] == "green"
+
+    def test_set_token_color_unknown_token_is_silent_noop(self):
+        room = Room(session_id=1)
+        room.apply(RoomEvent("set_token_color",
+                              {"token_id": "pc:999", "color": "blue"}))
+        # non deve crashare; snapshot resta coerente
+        assert room.snapshot()["participants"] == []
+
+    def test_enemy_add_with_explicit_color(self):
+        # alleato (PNG) aggiunto dal DM come pedina-enemy ma marcato blu
+        room = Room(session_id=1)
+        room.apply(RoomEvent("enemy_add", {"token_id": "ally:1",
+                                            "name": "Guardia cittadina",
+                                            "max_hp": 11, "color": "blue"}))
+        assert room.snapshot()["enemies"][0]["color"] == "blue"
+
+
 class TestRemoveParticipant:
     """Simmetrico a enemy_remove ma per i PG: toglie il PG dalla sessione.
     Non tocca il DB (il PG resta nel roster, e' solo fuori dalla room)."""

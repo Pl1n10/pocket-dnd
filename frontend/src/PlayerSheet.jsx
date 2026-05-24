@@ -84,6 +84,10 @@ export default function PlayerSheet() {
   const myTokenId = `pc:${characterId}`
   const isMyTurn = state?.active_token_id === myTokenId
 
+  // Scheda incompleta: il master ha creato il PG con solo nome+livello,
+  // tocca al giocatore scegliere classe/HP/attributi dal proprio telefono.
+  const needsSetup = !char.class
+
   // le azioni "tirabili": gli attacchi della scheda + i tiri base
   const actions = buildActions(char)
 
@@ -97,6 +101,8 @@ export default function PlayerSheet() {
           {capitalize(char.race)} {capitalize(char.class)} · livello {char.level}
         </div>
       </header>
+
+      {needsSetup && <SheetSetup char={char} characterId={characterId} />}
 
       {isMyTurn && (
         <div className="card" style={{
@@ -149,6 +155,152 @@ export default function PlayerSheet() {
       <RollFeed feed={state?.roll_feed ?? []} />
     </div>
   )
+}
+
+// 12 classi SRD (slug minuscoli, gli stessi della tabella srd_classes).
+// Hardcoded perche' l'insieme cambia raramente; il backend resta la fonte
+// autoritativa per il dado vita via lookup (D17).
+const SRD_CLASSES = [
+  'barbarian', 'bard', 'cleric', 'druid', 'fighter', 'monk',
+  'paladin', 'ranger', 'rogue', 'sorcerer', 'warlock', 'wizard',
+]
+
+// Setup iniziale di una scheda creata dal master con solo nome + livello.
+// Il giocatore sceglie classe / razza / attributi / HP / AC e fa Submit:
+// PATCH al backend, character_updated propaga, il banner sparisce e la
+// scheda diventa giocabile.
+function SheetSetup({ char, characterId }) {
+  const [draft, setDraft] = useState(() => ({
+    class: 'fighter',
+    race: '',
+    str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10,
+    max_hp: 10,
+    armor_class: 10,
+  }))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  function set(field, value) {
+    setDraft((d) => ({ ...d, [field]: value }))
+  }
+  function setNum(field, value, min = 1, max = 30) {
+    const n = Math.max(min, Math.min(max, Number(value) || 0))
+    set(field, n)
+  }
+
+  async function submit() {
+    setSaving(true); setError(null)
+    const resp = await fetch(`/api/characters/${characterId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...draft,
+        // alla creazione partiamo pieni di HP
+        current_hp: draft.max_hp,
+      }),
+    })
+    setSaving(false)
+    if (!resp.ok) {
+      setError(`Errore salvataggio (${resp.status})`)
+      return
+    }
+    // il character_updated WS aggiornera' `char` da solo, niente da fare
+  }
+
+  return (
+    <div className="card" style={{
+      borderColor: 'var(--candle)', padding: 14, marginBottom: 16,
+    }}>
+      <div style={{ fontFamily: 'Cinzel, serif', fontSize: 16,
+                     color: 'var(--candle)', marginBottom: 6 }}>
+        Completa la tua scheda
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+        Il DM ha creato {char.name} di livello {char.level}. Scegli classe,
+        attributi e punti ferita.
+      </div>
+
+      <SetupRow label="Classe">
+        <select value={draft.class}
+                onChange={(e) => set('class', e.target.value)}
+                style={inputStyle}>
+          {SRD_CLASSES.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+      </SetupRow>
+
+      <SetupRow label="Razza (libera)">
+        <input value={draft.race}
+                onChange={(e) => set('race', e.target.value)}
+                placeholder="es. elf, halfling, human..."
+                style={inputStyle} />
+      </SetupRow>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 6, margin: '8px 0' }}>
+        {[['FOR','str'], ['DES','dex'], ['COS','con'],
+          ['INT','int'], ['SAG','wis'], ['CAR','cha']].map(([n, f]) => (
+          <div key={f} style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{n}</div>
+            <input type="number" value={draft[f]} min={1} max={30}
+                    onChange={(e) => setNum(f, e.target.value, 1, 30)}
+                    style={{ ...inputStyle, textAlign: 'center', padding: 4 }} />
+            <div className="muted" style={{ fontSize: 10 }}>
+              mod {fmtMod(abilityMod(draft[f]))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <SetupRow label="HP max" style={{ flex: 1 }}>
+          <input type="number" value={draft.max_hp} min={1} max={999}
+                  onChange={(e) => setNum('max_hp', e.target.value, 1, 999)}
+                  style={inputStyle} />
+        </SetupRow>
+        <SetupRow label="CA" style={{ flex: 1 }}>
+          <input type="number" value={draft.armor_class} min={1} max={30}
+                  onChange={(e) => setNum('armor_class', e.target.value, 1, 30)}
+                  style={inputStyle} />
+        </SetupRow>
+      </div>
+
+      <button onClick={submit} disabled={saving} style={{
+        width: '100%', marginTop: 10,
+        background: 'var(--candle-dim)', color: 'var(--bg)',
+        border: 'none', borderRadius: 8, padding: '10px 12px',
+        fontFamily: 'Cinzel, serif', fontSize: 14,
+        cursor: saving ? 'wait' : 'pointer',
+      }}>
+        {saving ? 'Salvo…' : 'Salva e gioca'}
+      </button>
+      {error && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 8,
+                                         color: 'var(--blood)' }}>
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SetupRow({ label, children, style }) {
+  return (
+    <div style={{ marginBottom: 8, ...style }}>
+      <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>
+        {label}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const inputStyle = {
+  width: '100%', boxSizing: 'border-box',
+  background: 'var(--bg)', color: 'var(--ink)',
+  border: '1px solid var(--line)', borderRadius: 6,
+  padding: '6px 8px', fontSize: 14,
 }
 
 // Inventario: lista semplice di item ricevuti dal master come loot.

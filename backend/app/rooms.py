@@ -133,6 +133,26 @@ class Room:
 
     # ─────────────────────── mutazioni dirette ───────────────────────
 
+    def sync_participant_from(self, character: dict) -> bool:
+        """Aggiorna i dati live di una pedina PG dal DB (nome, max_hp,
+        current_hp). No-op se la pedina non e' in sessione.
+
+        Usato dal server dopo PATCH/level-up/setup iniziale: la Room non
+        sa del DB, ma il server le passa la scheda fresca cosi' i client
+        vedono i valori aggiornati anche senza ri-aggiungere il PG.
+
+        Restituisce True se qualcosa e' stato sincronizzato (per decidere
+        se fare broadcast)."""
+        tid = f"pc:{character['id']}"
+        t = self._tokens.get(tid)
+        if t is None:
+            return False
+        t.name = character["name"]
+        t.max_hp = character["max_hp"]
+        t.current_hp = character["current_hp"]
+        self._version += 1
+        return True
+
     def add_participant(self, character_id: int, name: str,
                          current_hp: int, max_hp: int) -> None:
         """Aggiunge un personaggio alla sessione. Auto-posiziona la pedina
@@ -286,3 +306,7 @@ class RoomManager:
 
     def close(self, session_id: int) -> None:
         self._rooms.pop(session_id, None)
+
+    def all_rooms(self) -> list[tuple[int, Room]]:
+        """Iteratore (session_id, room) sulle room aperte."""
+        return list(self._rooms.items())

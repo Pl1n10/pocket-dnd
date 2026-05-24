@@ -143,11 +143,13 @@ def create_app(db_path: str, schema_sql: str,
             raise HTTPException(status_code=404, detail="personaggio inesistente")
 
     @app.patch("/api/characters/{character_id}")
-    def update_character(character_id: int, changes: dict):
+    async def update_character(character_id: int, changes: dict):
         try:
             repo.update(character_id, changes)
         except CharacterNotFound:
             raise HTTPException(status_code=404, detail="personaggio inesistente")
+        # propaga il cambiamento ai client e sincronizza la pedina della Room
+        await _broadcast_character_updated(character_id)
         return repo.get(character_id)
 
     @app.delete("/api/characters/{character_id}", status_code=204)
@@ -227,23 +229,38 @@ def create_app(db_path: str, schema_sql: str,
 
     async def _broadcast_character_updated(character_id: int) -> None:
         """Notifica via WS che la scheda di un PG e' cambiata (level-up,
-        loot, edit dal master). I client interessati ri-disegnano senza
-        ri-fetchare via REST. In v0 esiste una sola sessione, quindi
-        mandiamo a tutte le room aperte."""
+        loot, setup iniziale, edit dal master).
+
+        Due effetti:
+          1. Sincronizza la pedina della Room (nome, max_hp, current_hp)
+             dal DB, se quel PG e' in qualche sessione, e ri-broadcasta
+             lo snapshot della room interessata (cosi' la lista eroi del
+             master e la griglia vedono i nuovi numeri).
+          2. Manda un messaggio `character_updated` a tutti i WS, cosi' i
+             PlayerSheet con quel character_id si ri-disegnano senza
+             ri-fetchare via REST (per i campi fuori dalla Room: classe,
+             attributi, AC, inventario, actions...).
+        """
         try:
             character = repo.get(character_id)
         except CharacterNotFound:
             return
+
+        # 1. sync della Room (se il PG e' in sessione)
+        for session_id, room in rooms.all_rooms():
+            if room.sync_participant_from(character):
+                await _broadcast(session_id, room)
+
+        # 2. character_updated a tutti i WS
         message = {"type": "character_updated",
                    "character_id": character_id, "character": character}
-        dead: list[WebSocket] = []
-        for ws_set in connections.values():
+        for ws_set in list(connections.values()):
+            dead: list[WebSocket] = []
             for ws in ws_set:
                 try:
                     await ws.send_json(message)
                 except Exception:
                     dead.append(ws)
-        for ws_set in connections.values():
             for ws in dead:
                 ws_set.discard(ws)
 

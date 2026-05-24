@@ -190,6 +190,55 @@ class TestGiveItemEndpoint:
             assert msg["character"]["inventory"][0]["name"] == "Mappa"
 
 
+class TestPatchSyncsRoomParticipant:
+    """Una PATCH su un PG in sessione deve aggiornare anche la pedina nella
+    Room (nome, max_hp, current_hp). Tipico per il setup iniziale del PG:
+    il master crea un PG vuoto, l'amico PATCH-a classe/HP dalla sua scheda,
+    e la lista eroi del master deve riflettere subito i nuovi valori."""
+
+    def test_patch_max_hp_syncs_into_room_snapshot(self, client):
+        cid = _make_character(client, name="Setup")   # 28/28 di default
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            # aggiungo alla sessione: pedina e' 28/28
+            ws.send_json({"type": "add_participant",
+                          "payload": {"character_id": cid}})
+            ws.receive_json()
+            # PATCH cambia max_hp/current_hp
+            client.patch(f"/api/characters/{cid}",
+                          json={"max_hp": 40, "current_hp": 40})
+            # arrivano: snapshot (sync della pedina) + character_updated
+            msgs = [ws.receive_json(), ws.receive_json()]
+            snaps = [m for m in msgs if m["type"] == "snapshot"]
+            assert snaps, msgs
+            pedina = snaps[-1]["state"]["participants"][0]
+            assert pedina["max_hp"] == 40
+            assert pedina["current_hp"] == 40
+
+    def test_patch_name_syncs_into_room_snapshot(self, client):
+        cid = _make_character(client, name="Senza nome")
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "add_participant",
+                          "payload": {"character_id": cid}})
+            ws.receive_json()
+            client.patch(f"/api/characters/{cid}", json={"name": "Korr"})
+            msgs = [ws.receive_json(), ws.receive_json()]
+            snaps = [m for m in msgs if m["type"] == "snapshot"]
+            assert snaps and snaps[-1]["state"]["participants"][0]["name"] == "Korr"
+
+    def test_patch_emits_character_updated_with_full_sheet(self, client):
+        cid = _make_character(client)
+        with client.websocket_connect("/ws/session/1") as ws:
+            ws.receive_json()
+            client.patch(f"/api/characters/{cid}",
+                          json={"class": "wizard", "int": 17})
+            msg = ws.receive_json()
+            assert msg["type"] == "character_updated"
+            assert msg["character"]["class"] == "wizard"
+            assert msg["character"]["int"] == 17
+
+
 class TestStaticSpa:
     """Modalita' container: il backend serve anche la SPA buildata. Le route
     API/WS hanno priorita'; le altre cadono sull'index della SPA."""

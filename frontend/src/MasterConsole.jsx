@@ -67,22 +67,23 @@ export default function MasterConsole() {
   // Crea un PG nuovo al volo (per il giocatore che arriva al tavolo dopo)
   // e lo aggiunge subito alla sessione. Solo i campi minimi: il resto si
   // edita poi dalla scheda /player/:id o ricaricando lo script di seed.
+  // Flusso: il master fissa solo nome e livello. Il PG nasce "vuoto"
+  // (classe vuota = scheda da completare) e viene aggiunto subito alla
+  // sessione, poi si apre il QR del link da passare al giocatore: l'amico
+  // sceglie classe, attributi e HP dal proprio telefono nella scheda.
   async function newPlayer() {
     const name = window.prompt('Nome del personaggio?', '')
     if (!name || !name.trim()) return
-    const cls = (window.prompt(
-      'Classe SRD? (fighter, wizard, rogue, cleric, bard, ranger, ' +
-      'barbarian, sorcerer, paladin, monk, druid, warlock)',
-      'fighter') || 'fighter').toLowerCase().trim()
     const level = Number(window.prompt('Livello?', '1')) || 1
-    const maxHp = Number(window.prompt('Punti ferita massimi?', '10')) || 10
     const resp = await fetch('/api/characters', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: name.trim(), class: cls, level,
-        max_hp: maxHp, current_hp: maxHp,
-        armor_class: 12,
+        name: name.trim(), level,
+        // class vuota = trigger del setup-form lato PlayerSheet
+        class: '',
+        // valori segnaposto: l'amico li reimposta dal setup
+        max_hp: 1, current_hp: 1, armor_class: 10,
       }),
     })
     if (!resp.ok) {
@@ -90,10 +91,10 @@ export default function MasterConsole() {
       return
     }
     const { id } = await resp.json()
-    // ricarica la lista PG e mette subito in sessione il nuovo arrivato
-    const list = await fetch('/api/characters').then((r) => r.json())
-    setRoster(list)
+    await reloadRoster()
     sendEvent('add_participant', { character_id: id })
+    // apri subito il QR con il link da passare al giocatore
+    setQrUrl(playerUrl(id))
   }
 
   async function reloadRoster() {
